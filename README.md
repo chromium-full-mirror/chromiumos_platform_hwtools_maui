@@ -11,9 +11,27 @@ Host Software:
     - Provide maintenance tools: all system components firmware updates, managing in fleet
     - General host interface for additional features: remote DUT disconnection, etc.
 
-## Contributions
+## Getting started
+
+Create a directory to checkout the Maui source:
+```shell
+mkdir maui_source
+cd maui_source
+```
+
+Get the source code:
+```shell
+git clone https://chromium.googlesource.com/chromiumos/platform/hwtools/maui
+cd maui
+```
+
 This repository uses pre-commit hooks to enforce code style. Please make sure you have them installed by running:
-```bash
+```shell
 pip install pre-commit --break-system-packages
 pre-commit install
+```
+
+To upload your changes to gerrit you can use:
+```shell
+git push origin HEAD:refs/for/main
 ```
