@@ -20,6 +20,8 @@ cscope.out
 cscope.po.out
 .coverage
 coverage.lcov
+/firmware/build
+/firmware/build_docker
 
 # Ignore tags for those using TAGS
 TAGS

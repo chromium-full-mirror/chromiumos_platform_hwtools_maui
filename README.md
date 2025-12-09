@@ -35,3 +35,16 @@ To upload your changes to gerrit you can use:
 ```shell
 git push origin HEAD:refs/for/main
 ```
+
+## Build firmware using Docker
+
+While being in `maui` directory (root of this repository), execute:
+
+```
+docker build -t maui -f dockerfiles/Dockerfile .
+docker run -it -v `pwd`:/repo maui:latest
+```
+
+This will generate a txt firmware file in
+`firmware/build_docker/zephyr/zephyr.txt`  
+This file can be used to flash Maui using BSL.

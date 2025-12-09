@@ -6,4 +6,86 @@
 ######################################################################
 # Prepare base container
 ######################################################################
-FROM debian:trixie as builder
+FROM debian:bookworm-slim AS downloader
+
+RUN apt update && apt upgrade -y && apt install -y --no-install-recommends \
+  ca-certificates \
+  ccache \
+  cmake \
+  device-tree-compiler \
+  dfu-util \
+  file \
+  g++-multilib \
+  gcc \
+  gcc-multilib \
+  git \
+  gperf \
+  libc6-i386 \
+  make \
+  ninja-build \
+  python3-dev \
+  python3-pip \
+  python3-pyelftools \
+  python3-setuptools \
+  python3-jsonschema \
+  python3-tk \
+  python3-wheel \
+  udev \
+  wget \
+  xz-utils \
+  && apt clean
+
+# There are other packages required for Zephyr tooling, e.g. twister, best to install them now
+COPY dockerfiles/requirements.compiled .
+RUN pip install --break-system-packages --require-hashes -r requirements.compiled
+
+######################################################################
+# Prepare Zephyr SDK
+FROM downloader AS zephyr-sdk
+ARG ZEPHYR_VERSION=0.17.4
+
+RUN wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_VERSION}/zephyr-sdk-${ZEPHYR_VERSION}_linux-x86_64_minimal.tar.xz -O /tmp/zephyr.tar.xz &&\
+  wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_VERSION}/toolchain_linux-x86_64_arm-zephyr-eabi.tar.xz -O /tmp/toolchain-arm.tar.xz &&\
+  tar xvf /tmp/zephyr.tar.xz -C /usr/local &&\
+  tar xvf /tmp/toolchain-arm.tar.xz -C /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/ &&\
+  /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/setup.sh -h -c &&\
+  rm /tmp/*.tar.xz &&\
+  cd /usr/local/zephyr-sdk-${ZEPHYR_VERSION} &&\
+  rm -rf xtensa* arc* aarch* micro* mips* nios2* riscv* sparc*
+
+######################################################################
+# Prepare Zephyr repository
+FROM downloader AS zephyr-repo
+
+RUN mkdir /zephyr
+WORKDIR /zephyr
+RUN git clone -b dev --depth=1 https://github.com/TexasInstruments/msp-zephyr.git zephyr
+
+WORKDIR /zephyr/zephyr
+RUN git checkout b27612fb49f501c94fbeff38b493d792377deb23
+RUN west init -l && west update msp-hal_ti cmsis cmsis_6 &&\
+  chmod +x /zephyr/zephyr/zephyr-env.sh &&\
+  chmod o+w /zephyr/.west/config
+
+WORKDIR /
+RUN git clone --depth=1 https://chromium.googlesource.com/chromiumos/platform/dolos
+
+######################################################################
+# Copy artifacts from previous stages
+FROM downloader AS builder
+
+COPY --from=zephyr-sdk /usr/local/ /usr/local/
+COPY --from=zephyr-repo /zephyr /zephyr
+COPY --from=zephyr-repo /dolos/tools/formatconverter/converter.py /usr/local/bin/converter.py
+
+######################################################################
+# Prepare scripts to build firmware
+COPY dockerfiles/firmware_build.sh /firmware_build.sh
+
+RUN chmod 777 /usr/local/bin/converter.py
+RUN chmod 777 /firmware_build.sh
+RUN ln -s /tmp /zephyr/zephyr/.cache
+
+WORKDIR /tmp
+VOLUME /repo
+ENTRYPOINT ["/bin/bash", "/firmware_build.sh"]
