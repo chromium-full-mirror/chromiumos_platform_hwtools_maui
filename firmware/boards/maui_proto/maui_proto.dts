@@ -1,0 +1,215 @@
+/* Copyright 2025 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+/dts-v1/;
+
+#include <ti/mspm0/g/mspm0g3507.dtsi>
+#include <ti/mspm0/g/mspm0g1x0x_g3x0x-pinctrl.dtsi>
+
+#include <zephyr/dt-bindings/clock/mspm0_clock.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/adc/adc.h>
+
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	model = "TI LP_MSPM0G3507";
+	compatible = "ti,mspm0g3507";
+
+	aliases {
+		led0 = &led0;
+		led1 = &led1;
+		sw0 = &btn0;
+		sw1 = &btn1;
+	};
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		led0: led_0 {
+			gpios = <&gpiob 22 GPIO_ACTIVE_HIGH>;
+			label = "Blue LED";
+		};
+		led1: led_1 {
+			gpios = <&gpiob 26 GPIO_ACTIVE_HIGH>;
+			label = "Red LED";
+		};
+	};
+
+	other_leds {
+		compatible = "gpio-leds";
+		led2: led_2 {
+			gpios = <&gpiob 27 GPIO_ACTIVE_HIGH>;
+			label = "Green LED";
+		};
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		btn0: btn_0 {
+			gpios = <&gpiob 21 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			label = "Switch 3";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+		btn1: btn_1 {
+			gpios = <&gpioa 18 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			label = "Switch 2";
+			zephyr,code = <INPUT_KEY_1>;
+		};
+	};
+};
+
+&cpu0 {
+	clock-frequency = <DT_FREQ_M(80)>;
+};
+
+&ulpclk {
+	clock-frequency = <DT_FREQ_M(40)>;
+	clk-div = <2>;
+};
+
+&mclk {
+	clock-frequency = <DT_FREQ_M(80)>;
+	clocks = <&hsclk 0>;
+};
+
+&hsclk {
+	clocks = <&syspll2x 0>;
+	status = "okay";
+};
+
+&syspll2x {
+	status = "okay";
+};
+
+&flash0 {
+	status = "okay";
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 0x8000>;
+		};
+
+		slot0_partition: partition@8000 {
+			label = "image-0";
+			reg = <0x00008000 0x8000>;
+		};
+
+		slot1_partition: partition@10000 {
+			label = "image-1";
+			reg = <0x00010000 0x8000>;
+		};
+
+		storage_partition: partition@18000 {
+			label = "storage";
+			reg = <0x00018000 0x8000>;
+		};
+	};
+};
+
+&pinctrl {
+	status = "okay";
+};
+
+&gpioa {
+	status = "okay";
+};
+
+&gpiob {
+	status = "okay";
+};
+
+&pwma0 {
+	status = "okay";
+
+	pinctrl-0 = <&tima0_ccp0_pa0>;
+	pinctrl-names = "default";
+	ti,cc-index = <0>;
+	ti,pwm-mode = "EDGE_ALIGN";
+	ti,period = <1000>;
+};
+
+&i2c1 {
+	pinctrl-0 = <&i2c1_scl_pa17 &i2c1_sda_pa16>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/ {
+	leds {
+		compatible = "gpio-leds";
+
+		// EC_LED_GREEN	PA12 (DIGITAL OUT)	PA12
+		EC_LED_GREEN: ec_led_green {
+			gpios = <&gpioa 12 GPIO_ACTIVE_HIGH>;
+			label = "Blue LED";
+		};
+		// EC_LED_AMBER	PA13 (DIGITAL OUT)	PA13
+		EC_LED_AMBER: ec_led_amber {
+			gpios = <&gpioa 13 GPIO_ACTIVE_HIGH>;
+			label = "Red LED";
+		};
+	};
+
+};
+
+&uart0 {
+	status = "okay";
+
+	// UART0_EC_TX_FTDI_RX	BSLTX (BSL UART_TX)	PA10
+	// UART0_FTDI_TX_EC_RX	BSLRX (BSL UART_RX)	PA11
+	current-speed = <115200>;
+	pinctrl-0 = <&uart0_tx_pa10 &uart0_rx_pa11>;
+	pinctrl-names = "default";
+};
+
+&adc0 {
+	status = "okay";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+	ti,clk-source = "MSP_ADC_CLOCK_ULPCLK";
+	ti,clk-range = "MSP_ADC_CLOCK_RANGE_32TO40";
+	ti,clk-divider = <1>;
+	max_result = <12>;
+
+	// EC_ADC_USB_HOST_CC2	A0_6 (ANALOG IN)	PB20
+	channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <2500>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+	};
+	// EC_ADC_USB_HOST_CC1	A0_7 (ANALOG IN)	PA22
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <2500>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+	};
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&analog_pa20 &analog_pa22>;
+
+	vref = <&vref0>;
+};
+
+&vref0 {
+	status = "okay";
+};
