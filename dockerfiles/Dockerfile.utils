@@ -1,0 +1,45 @@
+# Copyright 2025 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# syntax=docker/dockerfile:1
+# Base image
+FROM debian:trixie
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+# fw-updater needs libudev-dev and pkg-config for building
+# git and curl for fetching source and rustup
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    git \
+    libudev-dev \
+    pkg-config \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust using rustup
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Clone dolos repository
+WORKDIR /usr/src
+RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
+
+# Build fw-updater
+WORKDIR /usr/src/dolos/fw-updater
+ENV USER=root
+RUN cargo build --release
+
+# Install binary to system path
+RUN cp target/release/fw-updater /usr/local/bin/fw-updater
+
+# Clean up source code to save some space
+WORKDIR /
+RUN rm -rf /usr/src/dolos
+
+# Set the default entrypoint or command
+CMD ["fw-updater", "--help"]

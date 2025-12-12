@@ -41,10 +41,34 @@ git push origin HEAD:refs/for/main
 While being in `maui` directory (root of this repository), execute:
 
 ```
-docker build -t maui -f dockerfiles/Dockerfile .
+docker build -t maui -f dockerfiles/Dockerfile.fw_builder .
 docker run -it -v `pwd`:/repo maui:latest
 ```
 
 This will generate a txt firmware file in
-`firmware/build_docker/zephyr/zephyr.txt`  
+`firmware/build_docker/zephyr/zephyr.txt`
 This file can be used to flash Maui using BSL.
+
+## Host Tools & Firmware Update
+
+### Building the Utils Container
+The project includes a utility container for host-side tools like `fw-updater`.
+The container is automatically built when running the wrapper scripts, but can be built manually:
+
+```shell
+docker build -t maui-utils -f dockerfiles/Dockerfile.utils .
+```
+
+### Updating Firmware
+To update the firmware using the `fw-updater` tool (wrapped in the utility container):
+
+```shell
+./tools/scripts/fw-updater <firmware_image> [options]
+```
+
+The script automatically handles mounting the firmware file into the container, so you can pass the path to the file on your host machine directly.
+
+Example:
+```shell
+./tools/scripts/fw-updater firmware/build_docker/zephyr/zephyr.txt -u /dev/ttyUSB0
+```
