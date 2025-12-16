@@ -1,0 +1,13 @@
+/* Copyright 2025 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+// Temporary file for demonstration purposes, to be remove in future
+
+#ifndef UTILS_H
+#define UTILS_H
+
+int utils_add(int a, int b);
+
+#endif

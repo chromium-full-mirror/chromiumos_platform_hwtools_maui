@@ -22,6 +22,7 @@ cscope.po.out
 coverage.lcov
 /firmware/build
 /firmware/build_docker
+/firmware/tests/twister_outputs/*
 
 # Ignore tags for those using TAGS
 TAGS

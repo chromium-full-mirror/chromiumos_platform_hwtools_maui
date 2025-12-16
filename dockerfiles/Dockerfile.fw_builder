@@ -81,9 +81,11 @@ COPY --from=zephyr-repo /dolos/tools/formatconverter/converter.py /usr/local/bin
 ######################################################################
 # Prepare scripts to build firmware
 COPY dockerfiles/firmware_build.sh /firmware_build.sh
+COPY dockerfiles/firmware_test.sh /firmware_test.sh
 
 RUN chmod 777 /usr/local/bin/converter.py
 RUN chmod 777 /firmware_build.sh
+RUN chmod 777 /firmware_test.sh
 RUN ln -s /tmp /zephyr/zephyr/.cache
 
 WORKDIR /tmp

@@ -10,4 +10,4 @@ set(BOARD maui_proto)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(maui)
 
-target_sources(app PRIVATE src/main.c src/commands.c)
+target_sources(app PRIVATE src/main.c src/commands.c src/utils.c)

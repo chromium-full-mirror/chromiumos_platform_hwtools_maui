@@ -36,6 +36,58 @@ TBD
 
 TBD
 
+## Testing Strategy
+
+The project utilizes the Zephyr Twister framework for unit testing application logic.
+
+### Unit Tests
+- **Location:** `firmware/tests/unit/`
+- **Framework:** Zephyr Ztest + Twister
+- **Target Platform:** `native_sim` (simulates execution on the host machine).
+
+### Creating Unit Tests
+When creating new unit tests, follow this structure:
+
+1.  **Directory:** `firmware/tests/unit/<component>/`
+2.  **Configuration (`testcase.yaml`):**
+    ```yaml
+    tests:
+      <component>.basic:
+        tags: test_framework
+        platform_allow: native_sim
+        integration_platforms:
+          - native_sim
+    ```
+3.  **Project Config (`prj.conf`):**
+    ```
+    CONFIG_ZTEST=y
+    ```
+4.  **Build (`CMakeLists.txt`):**
+    Link the specific source files from the main firmware that need to be tested.
+    ```cmake
+    cmake_minimum_required(VERSION 3.20.0)
+    find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+    project(my_test)
+
+    target_sources(app PRIVATE src/main.c)
+    target_sources(app PRIVATE ../../../src/target_file.c) # Add file under test
+    target_include_directories(app PRIVATE ../../../src)
+    ```
+5.  **Source (`src/main.c`):** Use `ZTEST` macros.
+
+### Executing Tests
+Tests are run using the `maui-builder` Docker container. The `firmware_test.sh` script inside the container handles the environment setup.
+
+To run all tests:
+```bash
+docker run --rm -v $(pwd):/repo --entrypoint /firmware_test.sh maui-builder
+```
+
+To run specific tests or pass arguments:
+```bash
+docker run --rm -v $(pwd):/repo --entrypoint /firmware_test.sh maui-builder -s <test_suite> -v
+```
+
 ## Git Conventions
 
 ### Commit Messages
