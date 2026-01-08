@@ -59,7 +59,7 @@ FROM downloader AS zephyr-repo
 
 RUN mkdir /zephyr
 WORKDIR /zephyr
-RUN git clone -b dev --depth=1 https://github.com/TexasInstruments/msp-zephyr.git zephyr
+RUN git clone -b dev https://github.com/TexasInstruments/msp-zephyr.git zephyr
 
 WORKDIR /zephyr/zephyr
 RUN git checkout b27612fb49f501c94fbeff38b493d792377deb23
