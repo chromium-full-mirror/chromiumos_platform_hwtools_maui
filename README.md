@@ -40,7 +40,7 @@ git push origin HEAD:refs/for/main
 
 While being in `maui` directory (root of this repository), execute:
 
-```
+```shell
 docker build -t maui-builder -f dockerfiles/Dockerfile.fw_builder .
 docker run -it -v `pwd`:/repo maui-builder:latest
 ```

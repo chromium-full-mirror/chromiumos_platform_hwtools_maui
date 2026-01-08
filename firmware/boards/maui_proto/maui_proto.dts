@@ -10,21 +10,13 @@
 
 #include <zephyr/dt-bindings/clock/mspm0_clock.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
-#include <zephyr/dt-bindings/pwm/pwm.h>
 #include <zephyr/dt-bindings/adc/adc.h>
 
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 / {
-	model = "TI LP_MSPM0G3507";
+	model = "Maui Proto v1";
 	compatible = "ti,mspm0g3507";
-
-	aliases {
-		led0 = &led0;
-		led1 = &led1;
-		sw0 = &btn0;
-		sw1 = &btn1;
-	};
 
 	chosen {
 		zephyr,sram = &sram0;
@@ -33,39 +25,110 @@
 		zephyr,shell-uart = &uart0;
 	};
 
-	leds {
+	leds: leds {
 		compatible = "gpio-leds";
-		led0: led_0 {
+
+		ec_led_green: ec_led_green {
+			gpios = <&gpioa 12 GPIO_ACTIVE_HIGH>;
+		};
+		ec_led_amber: ec_led_amber {
+			gpios = <&gpioa 13 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	outputs {
+		compatible = "gpio-leds";
+
+		hub_smbus_en_ss_susp: hub_smbus_en_ss_susp_l {
+			gpios = <&gpioa 29 GPIO_ACTIVE_LOW>;
+		};
+		pdc_hi_priority_irq: pdc_hi_priority_irq_l {
+			gpios = <&gpioa 30 GPIO_ACTIVE_LOW>;
+		};
+		h2h_reset: h2h_reset_l {
+			gpios = <&gpioa 31 GPIO_ACTIVE_LOW>;
+		};
+		sbu_mux_dut_oe: sbu_mux_dut_oe_r_l {
+			gpios = <&gpiob 6 GPIO_ACTIVE_LOW>;
+		};
+		sbu_mux_dut_sel: sbu_mux_dut_sel_r {
+			gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>;
+		};
+		usb3_mux_dut_oe: usb3_mux_dut_oe_r_l {
+			gpios = <&gpiob 8 GPIO_ACTIVE_LOW>;
+		};
+		usb3_mux_dut_sel: usb3_mux_dut_sel_r {
+			gpios = <&gpiob 9 GPIO_ACTIVE_HIGH>;
+		};
+		usb2_mux_dut_oe: usb2_mux_dut_oe_r_l {
+			gpios = <&gpiob 10 GPIO_ACTIVE_LOW>;
+		};
+		usb2_mux_dut_sel: usb2_mux_dut_sel_r {
+			gpios = <&gpiob 11 GPIO_ACTIVE_HIGH>;
+		};
+		pp5000_cutoff: pp5000_cutoff {
+			gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>;
+		};
+		usb3_mux_host_oe: usb3_mux_host_oe_r_l {
+			gpios = <&gpiob 21 GPIO_ACTIVE_LOW>;
+		};
+		usb3_mux_host_sel: usb3_mux_host_sel_r {
 			gpios = <&gpiob 22 GPIO_ACTIVE_HIGH>;
-			label = "Blue LED";
 		};
-		led1: led_1 {
-			gpios = <&gpiob 26 GPIO_ACTIVE_HIGH>;
-			label = "Red LED";
+		hub_reset: hub_reset_l {
+			gpios = <&gpiob 26 GPIO_ACTIVE_LOW>;
 		};
 	};
 
-	other_leds {
-		compatible = "gpio-leds";
-		led2: led_2 {
-			gpios = <&gpiob 27 GPIO_ACTIVE_HIGH>;
-			label = "Green LED";
-		};
-	};
-
-	keys {
+	inputs {
+		//TODO: rethink the GPIOs definitions/driver
 		compatible = "gpio-keys";
-		btn0: btn_0 {
-			gpios = <&gpiob 21 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-			label = "Switch 3";
-			zephyr,code = <INPUT_KEY_0>;
+		debounce-interval-ms = <0>;
+
+		ec_hwrev_id1: ec_hwrev_id1 {
+			gpios = <&gpioa 3 GPIO_ACTIVE_HIGH>;
 		};
-		btn1: btn_1 {
-			gpios = <&gpioa 18 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-			label = "Switch 2";
-			zephyr,code = <INPUT_KEY_1>;
+		ec_hwrev_id2: ec_hwrev_id2 {
+			gpios = <&gpioa 4 GPIO_ACTIVE_HIGH>;
+		};
+		ec_hwrev_id3: ec_hwrev_id3 {
+			gpios = <&gpioa 23 GPIO_ACTIVE_HIGH>;
+		};
+		h2h_host_access_led: h2h_host_access_led {
+			gpios = <&gpioa 7 GPIO_ACTIVE_HIGH>;
+		};
+		h2h_dut_access_led: h2h_dut_access_led {
+			gpios = <&gpioa 8 GPIO_ACTIVE_HIGH>;
+		};
+		pdc_debug_uart_tx: pdc_debug_uart_tx {
+			gpios = <&gpioa 9 GPIO_ACTIVE_HIGH>;
+		};
+		hub_ss_up_status: hub_ss_up_status {
+			gpios = <&gpioa 24 GPIO_ACTIVE_HIGH>;
+		};
+		hub_hs_up_status: hub_hs_up_status {
+			gpios = <&gpioa 25 GPIO_ACTIVE_HIGH>;
+		};
+		i2c_pdc_irq: i2c_pdc_irq_l {
+			gpios = <&gpioa 28 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		};
+		h2h_dut_host_access_led: h2h_dut_host_access_led {
+			gpios = <&gpiob 1 GPIO_ACTIVE_HIGH>;
+		};
+		pp1200_pg_od: pp1200_pg_od_l {
+			gpios = <&gpiob 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		};
+		pp3300_pg_od: pp3300_pg_od_l {
+			gpios = <&gpiob 14 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		};
+		pp1100_pg_od: pp1100_pg_od_l {
+			gpios = <&gpiob 23 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		};
+		hub_hs_suspend: hub_hs_suspend {
+			gpios = <&gpiob 25 GPIO_ACTIVE_HIGH>;
 		};
 	};
+
 };
 
 &cpu0 {
@@ -93,32 +156,6 @@
 
 &flash0 {
 	status = "okay";
-
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
-
-		boot_partition: partition@0 {
-			label = "mcuboot";
-			reg = <0x00000000 0x8000>;
-		};
-
-		slot0_partition: partition@8000 {
-			label = "image-0";
-			reg = <0x00008000 0x8000>;
-		};
-
-		slot1_partition: partition@10000 {
-			label = "image-1";
-			reg = <0x00010000 0x8000>;
-		};
-
-		storage_partition: partition@18000 {
-			label = "storage";
-			reg = <0x00018000 0x8000>;
-		};
-	};
 };
 
 &pinctrl {
@@ -133,38 +170,10 @@
 	status = "okay";
 };
 
-&pwma0 {
-	status = "okay";
-
-	pinctrl-0 = <&tima0_ccp0_pa0>;
-	pinctrl-names = "default";
-	ti,cc-index = <0>;
-	ti,pwm-mode = "EDGE_ALIGN";
-	ti,period = <1000>;
-};
-
-&i2c1 {
-	pinctrl-0 = <&i2c1_scl_pa17 &i2c1_sda_pa16>;
+&i2c0 {
+	pinctrl-0 = <&i2c0_scl_pa1 &i2c0_sda_pa0>;
 	pinctrl-names = "default";
 	status = "okay";
-};
-
-/ {
-	leds {
-		compatible = "gpio-leds";
-
-		// EC_LED_GREEN	PA12 (DIGITAL OUT)	PA12
-		EC_LED_GREEN: ec_led_green {
-			gpios = <&gpioa 12 GPIO_ACTIVE_HIGH>;
-			label = "Blue LED";
-		};
-		// EC_LED_AMBER	PA13 (DIGITAL OUT)	PA13
-		EC_LED_AMBER: ec_led_amber {
-			gpios = <&gpioa 13 GPIO_ACTIVE_HIGH>;
-			label = "Red LED";
-		};
-	};
-
 };
 
 &uart0 {
@@ -175,39 +184,6 @@
 	current-speed = <115200>;
 	pinctrl-0 = <&uart0_tx_pa10 &uart0_rx_pa11>;
 	pinctrl-names = "default";
-};
-
-&adc0 {
-	status = "okay";
-
-	#address-cells = <1>;
-	#size-cells = <0>;
-	ti,clk-source = "MSP_ADC_CLOCK_ULPCLK";
-	ti,clk-range = "MSP_ADC_CLOCK_RANGE_32TO40";
-	ti,clk-divider = <1>;
-	max_result = <12>;
-
-	// EC_ADC_USB_HOST_CC2	A0_6 (ANALOG IN)	PB20
-	channel@0 {
-		reg = <0>;
-		zephyr,gain = "ADC_GAIN_1";
-		zephyr,reference = "ADC_REF_INTERNAL";
-		zephyr,vref-mv = <2500>;
-		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-	};
-	// EC_ADC_USB_HOST_CC1	A0_7 (ANALOG IN)	PA22
-	channel@1 {
-		reg = <1>;
-		zephyr,gain = "ADC_GAIN_1";
-		zephyr,reference = "ADC_REF_INTERNAL";
-		zephyr,vref-mv = <2500>;
-		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-	};
-
-	pinctrl-names = "default";
-	pinctrl-0 = <&analog_pa20 &analog_pa22>;
-
-	vref = <&vref0>;
 };
 
 &vref0 {

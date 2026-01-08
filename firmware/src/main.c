@@ -3,112 +3,61 @@
  * found in the LICENSE file.
  */
 
-#include <stdio.h>
-#include <zephyr/kernel.h>
+#include "led.h"
+
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(main);
 
 /* 1000 msec = 1 sec */
-#define SLEEP_TIME_MS   1000
+#define SLEEP_TIME_MS 1000
 
-/* The devicetree node identifier for the "led0" alias. */
-#define LED0_NODE DT_ALIAS(led0)
-#define LED1_NODE DT_ALIAS(led1)
-#define LED2_NODE DT_NODELABEL(led2)
+#define USB3_HOST_NODE DT_NODELABEL(usb3_mux_host_oe)
+static const struct gpio_dt_spec usb3_host_gpio =
+	GPIO_DT_SPEC_GET(USB3_HOST_NODE, gpios);
 
-/*
- * A build error on this line means your board is unsupported.
- * See the sample documentation for information on how to fix this.
- */
-static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
-static const struct gpio_dt_spec led1 = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
-static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
-
-#define SW0_NODE DT_NODELABEL(btn0)
-static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios, {0});
-static struct gpio_callback button_cb_data;
-
-void button_pressed(const struct device *dev, struct gpio_callback *cb,
-			uint32_t pins)
+int init_gpio(void)
 {
-	printf("Button pressed at %x\n", pins);
+	int ret;
+
+	if (!gpio_is_ready_dt(&usb3_host_gpio)) {
+		return 0;
+	}
+
+	/* Configure the pin to enable USB3 by default */
+	ret = gpio_pin_configure_dt(&usb3_host_gpio, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
+		return 0;
+	}
+
+	return 1;
 }
 
 int main(void)
 {
 	int ret;
-	bool led_state = true;
 
-	////////////////// LEDS
+	LOG_INF("Maui Firmware Starting");
 
-	printf("Configuring leds~!\n");
-	k_sleep(K_MSEC(1000));
-
-	if (!gpio_is_ready_dt(&led0)) {
-		return 0;
-	}
-
-	if (!gpio_is_ready_dt(&led1)) {
-		return 0;
-	}
-
-	if (!gpio_is_ready_dt(&led2)) {
-		return 0;
-	}
-
-	ret = gpio_pin_configure_dt(&led0, GPIO_OUTPUT_ACTIVE);
+	ret = leds_init();
 	if (ret < 0) {
+		LOG_ERR("Failed to initialize LEDs (err %d)", ret);
 		return 0;
 	}
 
-	ret = gpio_pin_configure_dt(&led1, GPIO_OUTPUT_INACTIVE);
+	ret = init_gpio();
 	if (ret < 0) {
+		LOG_ERR("Failed to initialize GPIOs (err %d)", ret);
 		return 0;
 	}
 
-	ret = gpio_pin_configure_dt(&led2, GPIO_OUTPUT_ACTIVE);
-	if (ret < 0) {
-		return 0;
-	}
-
-	////////////////// BUTTON
-
-	printf("Configuring buttons~!\n");
-	k_sleep(K_MSEC(1000));
-
-	if (!gpio_is_ready_dt(&button)) {
-                printf("Error: button device %s is not ready\n",
-                       button.port->name);
-                return 0;
-        }
-
-	ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
-	if (ret != 0) {
-		printf("Error %d: failed to configure %s pin %d\n",
-		       ret, button.port->name, button.pin);
-		return 0;
-	}
-
-	ret = gpio_pin_interrupt_configure_dt(&button,
-					      GPIO_INT_EDGE_TO_ACTIVE);
-	if (ret != 0) {
-		printf("Error %d: failed to configure interrupt on %s pin %d\n",
-			ret, button.port->name, button.pin);
-		return 0;
-	}
-
-	gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
-	gpio_add_callback(button.port, &button_cb_data);
-
-	printf("Main loop~!\n");
+	LOG_INF("Main loop~!");
 	while (1) {
-		ret = gpio_pin_toggle_dt(&led0);
-		ret = gpio_pin_toggle_dt(&led1);
-		if (ret < 0) {
-			return 0;
-		}
+		led_toggle(LED_GREEN);
+		led_toggle(LED_AMBER);
 
-		led_state = !led_state;
-		printf("LED state: %s\n", led_state ? "ON" : "OFF");
 		k_msleep(SLEEP_TIME_MS);
 	}
 	return 0;
