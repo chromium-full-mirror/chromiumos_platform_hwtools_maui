@@ -10,9 +10,9 @@
 
 #include <zephyr/dt-bindings/clock/mspm0_clock.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
-#include <zephyr/dt-bindings/adc/adc.h>
-
 #include <zephyr/dt-bindings/input/input-event-codes.h>
+
+#include "adc.dtsi"
 
 / {
 	model = "Maui Proto v1";

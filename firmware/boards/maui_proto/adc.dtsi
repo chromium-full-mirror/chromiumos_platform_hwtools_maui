@@ -1,0 +1,118 @@
+#include <zephyr/dt-bindings/adc/adc.h>
+
+&adc0 {
+	compatible = "ti,mspm0-adc12-wip";
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	pinctrl-0 = <&analog_pb20 &analog_pa22>;
+	pinctrl-names = "default";
+	ti,clk-range = <6>;
+	ti,clk-divider = <1>;
+
+	clocks = <&ulpclk MSPM0_CLOCK_ULPCLK>;
+	vref-mv = <3300>;
+	max_result_reg = <12>;
+
+	adc_usb_host_cc1: channel@6 {
+		reg = <6>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+
+	adc_usb_host_cc2: channel@7 {
+		reg = <7>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+
+	adc_temp_sensor: channel@b {
+		reg = <0xb>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time =
+			<ADC_ACQ_TIME(ADC_ACQ_TIME_TICKS, 200)>;
+		zephyr,resolution = <12>;
+	};
+};
+
+&adc1 {
+	compatible = "ti,mspm0-adc12-wip";
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clocks = <&ulpclk MSPM0_CLOCK_ULPCLK>;
+
+	max_result_reg = <12>;
+	pinctrl-0 = <&analog_pa16 &analog_pa17 &analog_pa18 &analog_pb17
+		     &analog_pb18 &analog_pb19 &analog_pa21>;
+	pinctrl-names = "default";
+	ti,clk-range = <6>;
+	ti,clk-divider = <1>;
+	vref-mv = <3300>;
+
+	adc_sbu1_det: channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+	adc_sbu2_det: channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+	adc_bsl: channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+	adc_ppvar_usb_chg_vbus: channel@4 {
+		reg = <4>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+	adc_ppvar_usb_dut_vbus: channel@5 {
+		reg = <5>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+	adc_pp5000_usb_host_vbus: channel@6 {
+		reg = <6>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+	adc_pp5000: channel@7 {
+		reg = <7>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+};

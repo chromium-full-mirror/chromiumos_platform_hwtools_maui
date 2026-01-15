@@ -3,6 +3,7 @@
  * found in the LICENSE file.
  */
 
+#include "adc.h"
 #include "led.h"
 
 #include <zephyr/drivers/gpio.h>
@@ -50,6 +51,12 @@ int main(void)
 	ret = init_gpio();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize GPIOs (err %d)", ret);
+		return 0;
+	}
+
+	ret = adcs_init();
+	if (ret < 0) {
+		LOG_ERR("Failed to initialize ADCs (err %d)", ret);
 		return 0;
 	}
 
