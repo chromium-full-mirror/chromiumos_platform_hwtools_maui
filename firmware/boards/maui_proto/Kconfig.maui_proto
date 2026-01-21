@@ -4,3 +4,5 @@
 
 config BOARD_MAUI_PROTO
 	select SOC_MSPM0G3507
+
+rsource "Kconfig.adc_wip"
