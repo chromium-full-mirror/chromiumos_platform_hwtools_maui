@@ -5,6 +5,7 @@
 
 #include "adc.h"
 #include "led.h"
+#include "pdc.h"
 
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
@@ -57,6 +58,12 @@ int main(void)
 	ret = adcs_init();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize ADCs (err %d)", ret);
+		return 0;
+	}
+
+	ret = pdc_init();
+	if (ret < 0) {
+		LOG_ERR("Failed to initialize PDC (err %d)", ret);
 		return 0;
 	}
 

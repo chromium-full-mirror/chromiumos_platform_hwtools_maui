@@ -186,6 +186,13 @@
 	pinctrl-names = "default";
 };
 
+&uart1 {
+	status = "okay";
+	current-speed = <12000000>;
+	pinctrl-0 = <&uart1_rx_pa9>;
+	pinctrl-names = "default";
+};
+
 &vref0 {
 	status = "okay";
 };
