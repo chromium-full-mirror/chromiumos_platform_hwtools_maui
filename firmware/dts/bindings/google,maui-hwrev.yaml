@@ -1,0 +1,17 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+description: Google MAUI Hardware Revision Id
+
+compatible: "google,maui-hwrev"
+
+include: base.yaml
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
+    description: |
+      GPIOs used to decode the hardware revision id. Pins should be in
+      MSB to LSB order.

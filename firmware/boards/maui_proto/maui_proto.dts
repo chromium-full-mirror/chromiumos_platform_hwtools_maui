@@ -85,15 +85,6 @@
 		compatible = "gpio-keys";
 		debounce-interval-ms = <0>;
 
-		ec_hwrev_id1: ec_hwrev_id1 {
-			gpios = <&gpioa 3 GPIO_ACTIVE_HIGH>;
-		};
-		ec_hwrev_id2: ec_hwrev_id2 {
-			gpios = <&gpioa 4 GPIO_ACTIVE_HIGH>;
-		};
-		ec_hwrev_id3: ec_hwrev_id3 {
-			gpios = <&gpioa 23 GPIO_ACTIVE_HIGH>;
-		};
 		h2h_host_access_led: h2h_host_access_led {
 			gpios = <&gpioa 7 GPIO_ACTIVE_HIGH>;
 		};
@@ -129,6 +120,12 @@
 		};
 	};
 
+	hwrev {
+		compatible = "google,maui-hwrev";
+		gpios = <&gpioa 23 GPIO_ACTIVE_HIGH>,
+				<&gpioa 4 GPIO_ACTIVE_HIGH>,
+				<&gpioa 3 GPIO_ACTIVE_HIGH>;
+	};
 };
 
 &cpu0 {
