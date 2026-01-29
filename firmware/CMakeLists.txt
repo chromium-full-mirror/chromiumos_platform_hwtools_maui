@@ -12,4 +12,5 @@ project(maui)
 
 target_sources(app PRIVATE
         drivers/adc_mspm0_adc12_wip.c
-        src/main.c src/commands.c src/utils.c src/led.c src/adc.c src/tps6699x.c)
+        src/main.c src/commands.c src/utils.c src/led.c src/adc.c src/tps6699x.c
+        src/tps6699x_fwup.c)
