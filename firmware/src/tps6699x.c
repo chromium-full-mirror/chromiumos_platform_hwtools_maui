@@ -15,6 +15,7 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
 
 #define DT_DRV_COMPAT ti_tps6699x
@@ -400,6 +401,151 @@ unlock_exit:
 	k_mutex_unlock(&data->lock);
 	return rv;
 }
+
+int tps_cmd_sbud(const struct device *dev, uint8_t en)
+{
+	union reg_data cmd_data;
+	int ret;
+
+	memset(&cmd_data, 0, sizeof(cmd_data));
+	cmd_data.data[0] = en;
+
+	ret = run_task_sync(dev, COMMAND_TASK_SBUD, &cmd_data, 1, 0, NULL);
+
+	return ret;
+}
+
+int tps_cmd_sbdf(const struct device *dev, uint8_t flip)
+{
+	union reg_data cmd_data;
+	int ret;
+
+	memset(&cmd_data, 0, sizeof(cmd_data));
+	cmd_data.data[0] = flip;
+
+	ret = run_task_sync(dev, COMMAND_TASK_SBDF, &cmd_data, 1, 0, NULL);
+
+	return ret;
+}
+
+static int cmd_pdc_sbud_handler(const struct shell *sh, size_t argc,
+				char **argv)
+{
+	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	int rv;
+	long val;
+	char *endptr;
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "TPS6699x device not ready");
+		return -ENODEV;
+	}
+
+	val = strtol(argv[1], &endptr, 0);
+	if (*endptr != '\0' || (val != 0 && val != 1)) {
+		shell_error(sh, "Invalid argument. Must be 0 or 1.");
+		return -EINVAL;
+	}
+
+	shell_print(sh, "Sending SBUd command with data: %ld", val);
+
+	rv = tps_cmd_sbud(dev, (uint8_t)val);
+	if (rv) {
+		shell_error(sh, "SBUd command failed: %d", rv);
+		return rv;
+	}
+
+	shell_print(sh, "SBUd command successful");
+	return 0;
+}
+
+static int cmd_pdc_sbdf_handler(const struct shell *sh, size_t argc,
+				char **argv)
+{
+	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	int rv;
+	long val;
+	char *endptr;
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "TPS6699x device not ready");
+		return -ENODEV;
+	}
+
+	val = strtol(argv[1], &endptr, 0);
+	if (*endptr != '\0' || (val != 0 && val != 1)) {
+		shell_error(sh, "Invalid argument. Must be 0 or 1.");
+		return -EINVAL;
+	}
+
+	shell_print(sh, "Sending SBDF command with data: %ld", val);
+
+	rv = tps_cmd_sbdf(dev, (uint8_t)val);
+	if (rv) {
+		shell_error(sh, "SBDF command failed: %d", rv);
+		return rv;
+	}
+
+	shell_print(sh, "SBDF command successful");
+	return 0;
+}
+
+static int cmd_pdc_info_handler(const struct shell *sh, size_t argc,
+				char **argv)
+{
+	int rv;
+	const struct device *dev;
+	union reg_mode mode;
+	union reg_version version;
+	union reg_customer_use customer_use;
+
+	dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "TPS6699x device not ready");
+		return -ENODEV;
+	}
+
+	shell_print(sh, "Using TPS6699x device: %s", dev->name);
+
+	rv = tps_rd_mode(dev, &mode);
+	if (rv) {
+		shell_error(sh, "Failed to read Mode: %d", rv);
+		return rv;
+	}
+	shell_print(sh, "Mode: %c%c%c%c", mode.data[0], mode.data[1],
+		    mode.data[2], mode.data[3]);
+
+	rv = tps_rd_version(dev, &version);
+	if (rv) {
+		shell_error(sh, "Failed to read Version: %d", rv);
+		return rv;
+	}
+	shell_print(sh, "Version: %08x", version.version);
+
+	rv = tps_rd_customer_use(dev, &customer_use);
+	if (rv) {
+		shell_error(sh, "Failed to read Customer Version: %d", rv);
+		return rv;
+	}
+	shell_print(sh, "App Config Version: %08x",
+		    customer_use.app_config_version);
+	shell_print(sh, "FW Version: %08x", customer_use.fw_version);
+
+	return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+	sub_pdc_cmds,
+	SHELL_CMD_ARG(sbud, NULL, "Send SBUd command <0|1>",
+		      cmd_pdc_sbud_handler, 2, 0),
+	SHELL_CMD_ARG(sbdf, NULL, "Send SBDF command <0|1>",
+		      cmd_pdc_sbdf_handler, 2, 0),
+	SHELL_CMD_ARG(info, NULL, "Read and print chip info",
+		      cmd_pdc_info_handler, 1, 0),
+	SHELL_SUBCMD_SET_END);
+
+SHELL_CMD_REGISTER(pdc, &sub_pdc_cmds, "PDC commands", NULL);
 
 static int tps6699x_init(const struct device *dev)
 {

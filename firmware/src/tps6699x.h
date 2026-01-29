@@ -94,4 +94,24 @@ int run_task_sync(const struct device *dev, enum command_task task,
 		  union reg_data *cmd_data, size_t write_len, size_t read_len,
 		  uint8_t *user_buf);
 
+/**
+ * @brief Run SBUd command to control SBU MUX EN
+ *
+ * @param i2c device pointer to i2c device
+ * @param conn_status 0 to disable, 1 to enable
+ *
+ * @return 0 on success, else negative error code
+ */
+int tps_cmd_sbud(const struct device *dev, uint8_t en);
+
+/**
+ * @brief Run SBDF command to control SBU MUX polarity
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param ufp_status 0 to not flip, 1 to flip
+ *
+ * @return 0 on success, else negative error code
+ */
+int tps_cmd_sbdf(const struct device *dev, uint8_t flip);
+
 #endif /* ZEPHYR_DRIVERS_USBC_TPS6699X_H_ */

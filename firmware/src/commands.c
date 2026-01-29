@@ -4,6 +4,7 @@
  */
 
 #include "app_version.h"
+
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/reboot.h>
@@ -90,5 +91,6 @@ static int cmd_reset_handler(const struct shell *shell, size_t argc,
 }
 
 SHELL_CMD_REGISTER(reset, NULL, "Reset the device", cmd_reset_handler);
-SHELL_CMD_REGISTER(version, NULL, "Prints firmware version", cmd_version_handler);
+SHELL_CMD_REGISTER(version, NULL, "Prints firmware version",
+		   cmd_version_handler);
 SHELL_CMD_REGISTER(bsl, NULL, "Invokes BSL", cmd_jump_to_bsl_handler);

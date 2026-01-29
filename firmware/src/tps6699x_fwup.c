@@ -505,51 +505,6 @@ static int cmd_pdc_tps_fwup_abort(const struct shell *sh, size_t argc,
 	return pdc_tps6699x_fwup_abort();
 }
 
-static int cmd_pdc_tps_fwup_info(const struct shell *sh, size_t argc,
-				 char **argv)
-{
-	int rv;
-	const struct device *dev;
-	union reg_mode mode;
-	union reg_version version;
-	union reg_customer_use customer_use;
-
-	dev = DEVICE_DT_GET_ONE(ti_tps6699x);
-
-	if (!device_is_ready(dev)) {
-		shell_error(sh, "TPS6699x device not ready");
-		return -ENODEV;
-	}
-
-	shell_print(sh, "Using TPS6699x device: %s", dev->name);
-
-	rv = tps_rd_mode(dev, &mode);
-	if (rv) {
-		shell_error(sh, "Failed to read Mode: %d", rv);
-		return rv;
-	}
-	shell_print(sh, "Mode: %c%c%c%c", mode.data[0], mode.data[1],
-		    mode.data[2], mode.data[3]);
-
-	rv = tps_rd_version(dev, &version);
-	if (rv) {
-		shell_error(sh, "Failed to read Version: %d", rv);
-		return rv;
-	}
-	shell_print(sh, "Version: %08x", version.version);
-
-	rv = tps_rd_customer_use(dev, &customer_use);
-	if (rv) {
-		shell_error(sh, "Failed to read Customer Version: %d", rv);
-		return rv;
-	}
-	shell_print(sh, "App Config Version: %08x",
-		    customer_use.app_config_version);
-	shell_print(sh, "FW Version: %08x", customer_use.fw_version);
-
-	return 0;
-}
-
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_pdc_tps_fwup_cmds,
 	SHELL_CMD_ARG(start, NULL,
@@ -576,11 +531,6 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      "Recover from a failed or interrupted update session\n"
 		      "Usage: pdc_tps_fwup abort",
 		      cmd_pdc_tps_fwup_abort, 1, 0),
-	SHELL_CMD_ARG(
-		info, NULL,
-		"Read and print chip info (Mode, Version) for verification\n"
-		"Usage: pdc_tps_fwup info",
-		cmd_pdc_tps_fwup_info, 1, 0),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(pdc_tps_fwup, &sub_pdc_tps_fwup_cmds,
 		   "TI PDC firmware update commands", NULL);

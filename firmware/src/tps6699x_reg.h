@@ -200,6 +200,10 @@ enum command_task {
 	COMMAND_TASK_TFUQ = TASK_TO_UINT32('T', 'F', 'U', 'q'),
 	/* Abort current task */
 	COMMAND_TASK_ABRT = TASK_TO_UINT32('A', 'B', 'R', 'T'),
+	/* SBUd command */
+	COMMAND_TASK_SBUD = TASK_TO_UINT32('S', 'B', 'U', 'd'),
+	/* SBDF command */
+	COMMAND_TASK_SBDF = TASK_TO_UINT32('S', 'B', 'D', 'F'),
 };
 BUILD_ASSERT(sizeof(enum command_task) == sizeof(uint32_t));
 
