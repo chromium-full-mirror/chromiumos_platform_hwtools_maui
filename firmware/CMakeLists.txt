@@ -1,4 +1,4 @@
-# Copyright 2025 The ChromiumOS Authors
+# Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,5 +11,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(maui)
 
 target_sources(app PRIVATE
-	drivers/adc_mspm0_adc12_wip.c
-	src/main.c src/commands.c src/utils.c src/led.c src/adc.c src/pdc.c)
+        drivers/adc_mspm0_adc12_wip.c
+        src/main.c src/commands.c src/utils.c src/led.c src/adc.c src/tps6699x.c)
