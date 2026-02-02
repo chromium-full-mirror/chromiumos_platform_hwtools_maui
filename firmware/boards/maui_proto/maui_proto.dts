@@ -48,12 +48,6 @@
 		h2h_reset: h2h_reset_l {
 			gpios = <&gpioa 31 GPIO_ACTIVE_LOW>;
 		};
-		sbu_mux_dut_oe: sbu_mux_dut_oe_r_l {
-			gpios = <&gpiob 6 GPIO_ACTIVE_LOW>;
-		};
-		sbu_mux_dut_sel: sbu_mux_dut_sel_r {
-			gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>;
-		};
 		usb3_mux_dut_oe: usb3_mux_dut_oe_r_l {
 			gpios = <&gpiob 8 GPIO_ACTIVE_LOW>;
 		};
@@ -125,6 +119,15 @@
 		gpios = <&gpioa 23 GPIO_ACTIVE_HIGH>,
 				<&gpioa 4 GPIO_ACTIVE_HIGH>,
 				<&gpioa 3 GPIO_ACTIVE_HIGH>;
+	};
+
+	dut_sbu_mux: dut-sbu-mux {
+		compatible = "google,maui-sbu-mux";
+		status = "okay";
+
+		pdc = <&pdc>;
+		mux-oe-gpios = <&gpiob 6 GPIO_ACTIVE_LOW>;
+		mux-sel-gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>;
 	};
 };
 

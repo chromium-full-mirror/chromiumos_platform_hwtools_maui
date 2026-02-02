@@ -1,0 +1,35 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+description: Google MAUI mux for CCD SBU pins
+
+compatible: "google,maui-sbu-mux"
+
+include: base.yaml
+
+properties:
+  pdc:
+    type: phandle
+
+  mux-oe-gpios:
+    type: phandle-array
+    description: |
+      Mux output enable pin
+
+  mux-sel-gpios:
+    type: phandle-array
+    description: |
+      Mux polarity selection pin
+
+  low-thresh:
+    type: int
+    default: 700
+    description: |
+      Upper voltage threshold to threat signal as low
+
+  high-thresh:
+    type: int
+    default: 2500
+    description: |
+      Lower voltage threshold to threat signal as high

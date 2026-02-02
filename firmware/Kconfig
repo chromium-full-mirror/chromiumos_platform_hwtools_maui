@@ -6,4 +6,23 @@ config PDC_DEBUG
 	bool "Enable debug messages from PDC"
 	depends on UART_INTERRUPT_DRIVEN
 
+choice SBU_MUX_TYPE
+	bool "Type of mux for SBU lanes"
+
+config SBU_MUX_TYPE_PDC
+	bool "PDC as SBU lanes mux"
+
+config SBU_MUX_TYPE_GPIO
+	bool "GPIO as SBU lanes mux"
+
+endchoice
+
+config SBU_MUX_INIT_DELAY
+	int "Delay between bootup and polling in milliseconds"
+	default 0
+
+config SBU_MUX_PERIOD
+	int "Period of reading the SBU lanes in milliseconds"
+	default 100
+
 source "Kconfig.zephyr"

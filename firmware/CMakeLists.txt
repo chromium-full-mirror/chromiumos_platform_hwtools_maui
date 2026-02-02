@@ -17,7 +17,8 @@ target_sources(app PRIVATE
 	src/hwrev.c
 	src/led.c
 	src/main.c
-	src/utils.c
+	src/sbu_mux.c
 	src/tps6699x.c
 	src/tps6699x_fwup.c
+	src/utils.c
 )
