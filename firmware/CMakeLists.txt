@@ -14,6 +14,7 @@ target_sources(app PRIVATE
 	drivers/adc_mspm0_adc12_wip.c
 	src/adc.c
 	src/commands.c
+	src/gpio.c
 	src/hwrev.c
 	src/led.c
 	src/main.c

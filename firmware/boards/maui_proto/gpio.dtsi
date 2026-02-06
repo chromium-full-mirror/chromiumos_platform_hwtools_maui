@@ -1,0 +1,120 @@
+/* Copyright 2026 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+#include "gpio_ext.h"
+
+/ {
+	gpios {
+		compatible = "google,maui-gpios";
+
+		// Outputs
+
+		h2h_reset: h2h_reset_l {
+			gpios = <&gpioa 31 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb3_mux_dut_oe: usb3_mux_dut_oe_r_l {
+			gpios = <&gpiob 8 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb3_mux_dut_sel: usb3_mux_dut_sel_r {
+			gpios = <&gpiob 9 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		usb2_mux_dut_oe: usb2_mux_dut_oe_r_l {
+			gpios = <&gpiob 10 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb2_mux_dut_sel: usb2_mux_dut_sel_r {
+			gpios = <&gpiob 11 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pp5000_cutoff: pp5000_cutoff {
+			gpios = <&gpiob 12 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		usb3_mux_host_oe: usb3_mux_host_oe_r_l {
+			gpios = <&gpiob 21 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb3_mux_host_sel: usb3_mux_host_sel_r {
+			gpios = <&gpiob 22 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		hub_reset: hub_reset_l {
+			gpios = <&gpiob 26 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		// Inputs
+
+		h2h_host_access_led_l: h2h_host_access_led_l {
+			gpios = <&gpioa 7 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		h2h_dut_access_led_l: h2h_dut_access_led_l {
+			gpios = <&gpioa 8 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		hub_ss_up_status: hub_ss_up_status {
+			gpios = <&gpioa 24 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		hub_hs_up_status: hub_hs_up_status {
+			gpios = <&gpioa 25 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		i2c_pdc_irq: i2c_pdc_irq_l {
+			gpios = <&gpioa 28 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		};
+
+		hub_ss_suspend: hub_ss_suspend {
+			gpios = <&gpioa 29 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pdc_hi_priority_irq_l: pdc_hi_priority_irq_l {
+			gpios = <&gpioa 30 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		pp3300_ec_status: pp3300_ec_status {
+			gpios = <&gpiob 0 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		h2h_dut_host_access_led_l: h2h_dut_host_access_led_l {
+			gpios = <&gpiob 1 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		pdc_gpio8: pdc_gpio8 {
+			gpios = <&gpiob 2 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pdc_gpio9: pdc_gpio9 {
+			gpios = <&gpiob 3 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pdc_gpio10: pdc_gpio10 {
+			gpios = <&gpiob 4 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pdc_gpio11: pdc_gpio11 {
+			gpios = <&gpiob 5 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pp1200_pg_od: pp1200_pg_od {
+			gpios = <&gpiob 13 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pp3300_pg_od: pp3300_pg_od {
+			gpios = <&gpiob 14 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pp1100_pg_od: pp1100_pg_od {
+			gpios = <&gpiob 23 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
+		};
+
+		hub_hs_suspend: hub_hs_suspend {
+			gpios = <&gpiob 25 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+	};
+};

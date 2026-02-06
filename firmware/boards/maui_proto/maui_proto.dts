@@ -13,6 +13,7 @@
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 #include "adc.dtsi"
+#include "gpio.dtsi"
 
 / {
 	model = "Maui Proto v1";
@@ -33,84 +34,6 @@
 		};
 		ec_led_amber: ec_led_amber {
 			gpios = <&gpioa 13 GPIO_ACTIVE_HIGH>;
-		};
-	};
-
-	outputs {
-		compatible = "gpio-leds";
-
-		hub_smbus_en_ss_susp: hub_smbus_en_ss_susp_l {
-			gpios = <&gpioa 29 GPIO_ACTIVE_LOW>;
-		};
-		pdc_hi_priority_irq: pdc_hi_priority_irq_l {
-			gpios = <&gpioa 30 GPIO_ACTIVE_LOW>;
-		};
-		h2h_reset: h2h_reset_l {
-			gpios = <&gpioa 31 GPIO_ACTIVE_LOW>;
-		};
-		usb3_mux_dut_oe: usb3_mux_dut_oe_r_l {
-			gpios = <&gpiob 8 GPIO_ACTIVE_LOW>;
-		};
-		usb3_mux_dut_sel: usb3_mux_dut_sel_r {
-			gpios = <&gpiob 9 GPIO_ACTIVE_HIGH>;
-		};
-		usb2_mux_dut_oe: usb2_mux_dut_oe_r_l {
-			gpios = <&gpiob 10 GPIO_ACTIVE_LOW>;
-		};
-		usb2_mux_dut_sel: usb2_mux_dut_sel_r {
-			gpios = <&gpiob 11 GPIO_ACTIVE_HIGH>;
-		};
-		pp5000_cutoff: pp5000_cutoff {
-			gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>;
-		};
-		usb3_mux_host_oe: usb3_mux_host_oe_r_l {
-			gpios = <&gpiob 21 GPIO_ACTIVE_LOW>;
-		};
-		usb3_mux_host_sel: usb3_mux_host_sel_r {
-			gpios = <&gpiob 22 GPIO_ACTIVE_HIGH>;
-		};
-		hub_reset: hub_reset_l {
-			gpios = <&gpiob 26 GPIO_ACTIVE_LOW>;
-		};
-	};
-
-	inputs {
-		//TODO: rethink the GPIOs definitions/driver
-		compatible = "gpio-keys";
-		debounce-interval-ms = <0>;
-
-		h2h_host_access_led: h2h_host_access_led {
-			gpios = <&gpioa 7 GPIO_ACTIVE_HIGH>;
-		};
-		h2h_dut_access_led: h2h_dut_access_led {
-			gpios = <&gpioa 8 GPIO_ACTIVE_HIGH>;
-		};
-		pdc_debug_uart_tx: pdc_debug_uart_tx {
-			gpios = <&gpioa 9 GPIO_ACTIVE_HIGH>;
-		};
-		hub_ss_up_status: hub_ss_up_status {
-			gpios = <&gpioa 24 GPIO_ACTIVE_HIGH>;
-		};
-		hub_hs_up_status: hub_hs_up_status {
-			gpios = <&gpioa 25 GPIO_ACTIVE_HIGH>;
-		};
-		i2c_pdc_irq: i2c_pdc_irq_l {
-			gpios = <&gpioa 28 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-		};
-		h2h_dut_host_access_led: h2h_dut_host_access_led {
-			gpios = <&gpiob 1 GPIO_ACTIVE_HIGH>;
-		};
-		pp1200_pg_od: pp1200_pg_od_l {
-			gpios = <&gpiob 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-		};
-		pp3300_pg_od: pp3300_pg_od_l {
-			gpios = <&gpiob 14 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-		};
-		pp1100_pg_od: pp1100_pg_od_l {
-			gpios = <&gpiob 23 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-		};
-		hub_hs_suspend: hub_hs_suspend {
-			gpios = <&gpiob 25 GPIO_ACTIVE_HIGH>;
 		};
 	};
 
@@ -184,8 +107,6 @@
 &uart0 {
 	status = "okay";
 
-	// UART0_EC_TX_FTDI_RX	BSLTX (BSL UART_TX)	PA10
-	// UART0_FTDI_TX_EC_RX	BSLRX (BSL UART_RX)	PA11
 	current-speed = <115200>;
 	pinctrl-0 = <&uart0_tx_pa10 &uart0_rx_pa11>;
 	pinctrl-names = "default";
