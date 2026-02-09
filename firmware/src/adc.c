@@ -15,7 +15,6 @@
 #define MSPM0G350X_TSC -1.8
 // Value -56 is approximation of (1.0 / MSPM0G350X_TSC * 100)
 #define ONE_BY_MSPM0G350X_TSC_INT_APROX -56
-// -0.002044
 // Datasheet for the family specifies this as <27, 33>, with typical 30
 #define MSPM0G350X_TSTRIM 30
 
@@ -86,7 +85,7 @@ int adcs_init()
 			continue;
 		}
 
-		LOG_INF("Initializing ADC channel %s", adc_channel_to_str(a));
+		LOG_DBG("Initializing ADC channel %s", adc_channel_to_str(a));
 
 		if (!adc_is_ready_dt(&adc_channels[a])) {
 			LOG_ERR("ADC controller for channel %s is not ready",
@@ -102,6 +101,7 @@ int adcs_init()
 		}
 	}
 
+	LOG_INF("Initialized ADC channels");
 	return 0;
 }
 
