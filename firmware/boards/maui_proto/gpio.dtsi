@@ -36,7 +36,7 @@
 		};
 
 		usb3_mux_host_oe: usb3_mux_host_oe_r_l {
-			gpios = <&gpiob 21 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpiob 21 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
 		};
 
 		usb3_mux_host_sel: usb3_mux_host_sel_r {

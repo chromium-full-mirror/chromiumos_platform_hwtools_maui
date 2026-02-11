@@ -16,6 +16,7 @@ target_sources(app PRIVATE
 	src/commands.c
 	src/gpio.c
 	src/gpio_shell.c
+	src/host_mux.c
 	src/hwrev.c
 	src/led.c
 	src/main.c

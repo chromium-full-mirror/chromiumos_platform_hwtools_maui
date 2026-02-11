@@ -25,4 +25,16 @@ config SBU_MUX_PERIOD
 	int "Period of reading the SBU lanes in milliseconds"
 	default 100
 
+config HOST_MUX_INIT_DELAY
+	int "Delay between bootup and polling in milliseconds"
+	default 10
+
+config HOST_MUX_PERIOD
+	int "Period of reading the Host CC lanes in milliseconds"
+	default 20
+
+config HOST_MUX_HIGH_THRESH
+	int "Lower voltage threshold to treat signal as high (millivolts)"
+	default 200
+
 source "Kconfig.zephyr"
