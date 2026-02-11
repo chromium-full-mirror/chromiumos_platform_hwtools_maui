@@ -23,15 +23,45 @@ Host Software:
 
 ## Directory Structure
 
-TBD
+*   `firmware/`: Main MCU firmware source.
+    *   `src/`: Application source code and internal drivers.
+    *   `boards/`: Board definitions (devicetree, Kconfig defconfig).
+    *   `dts/`: Custom Device Tree bindings.
+*   `dockerfiles/`: Docker definitions for build and test environments.
+*   `tools/`: Host-side tools and scripts.
 
 ## Build Instructions
 
-TBD
+The firmware is built using the `maui-builder` Docker container.
+
+To build the firmware:
+```bash
+docker run --rm -v $(pwd):/repo maui-builder:latest
+```
+
+This will generate the build artifacts in `firmware/build_docker/`.
+
+## Development Guidelines
+
+### GPIO Handling
+The project uses a custom internal driver for GPIO management to simplify access and configuration.
+
+1.  **Definition**: All GPIOs must be defined in the `gpio.dtsi` file under the `google,maui-gpios` compatible node.
+2.  **Naming**: Use descriptive node names. The driver automatically generates an enum value for each GPIO based on its node name (converted to uppercase and prefixed with `GPIO_`).
+    *   Example: Node `usb3_mux_sel` becomes `GPIO_USB3_MUX_SEL`.
+3.  **Access**: Do **not** use standard Zephyr `gpio_dt_spec` or `device_get_binding` for these GPIOs in application code.
+    *   Include `firmware/src/gpio.h`.
+    *   Use `gpio_set(GPIO_ENUM_NAME, val)` to set output values.
+    *   Use `gpio_get(GPIO_ENUM_NAME)` to read input values.
+
+### Application Logic & Drivers
+*   **Logic Modules**: For application logic (e.g., controlling muxes, handling state machines based on ADC inputs), prefer creating simple modules initialized via `SYS_INIT`. Avoid creating full Zephyr Device Drivers (using `DEVICE_DT_INST_DEFINE`) unless the module strictly represents a hardware peripheral requiring that model.
+*   **Configuration**: Use `Kconfig` for tunable parameters (e.g., timing delays, voltage thresholds) rather than Device Tree properties, especially for logic modules that don't have a direct hardware representation in the DT.
 
 ## Flashing the Firmware
 
 TBD
+
 ## Serial Console
 
 TBD
