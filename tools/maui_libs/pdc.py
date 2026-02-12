@@ -1,28 +1,27 @@
-#!/usr/bin/env python3
 # Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """
-Maui PDC Firmware Update Tool (TPS6699x)
-Updates the PDC firmware via the Maui shell console using the TI TFU Bundle format.
+Maui PDC Firmware Update Module (TPS6699x).
+
+This module handles the firmware update of the Power Delivery Controller (PDC)
+via the Maui shell console using the TI TFU Bundle format.
 """
 
-import argparse
 import base64
 import logging
 import re
 import struct
-import sys
 import time
+from typing import Tuple
+from typing import TYPE_CHECKING
 
 
-try:
-    import serial
-except ImportError:
-    print("Error: 'pyserial' module is required.")
-    print("Please install it using: pip install pyserial")
-    sys.exit(1)
+if TYPE_CHECKING:
+    from maui_libs.device import MauiDevice
+
+LOG = logging.getLogger(__name__)
 
 # TPS6699x Constants
 CMD_START = "pdc_tps_fwup start"
@@ -31,75 +30,34 @@ CMD_SEND_BLOCK = "pdc_tps_fwup send_block"
 CMD_STREAM = "pdc_tps_fwup stream"
 CMD_COMPLETE = "pdc_tps_fwup complete"
 CMD_ABORT = "pdc_tps_fwup abort"
-CMD_INFO = "pdc_tps_fwup info"
-
-# Setup logging
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-log = logging.getLogger("pdc_fwup")
 
 
-class MauiSerialClient:
+class MauiPdcClientAdapter:
     """
-    Implements the TpsUpdaterServodClient interface but communicates
-    directly over a serial port to the Maui shell.
+    Adapts a MauiDevice to the interface required by Tps6699xFirmwareUpdater.
     """
 
-    def __init__(self, port, baudrate=115200, debug=False):
-        self.ser = serial.Serial(port, baudrate, timeout=3.0)
-        self.debug = debug
-        self.prompt = b"maui$ "
+    def __init__(self, device: "MauiDevice"):
+        self.device = device
 
-    def _read_until_prompt(self):
-        output = b""
-        while True:
-            chunk = self.ser.read(1)
-            if not chunk:
-                break
-            output += chunk
-            if output.endswith(self.prompt):
-                break
-
-        if self.debug:
-            print(f"[DEBUG] RX: {output.decode(errors='replace')}")
-        return output.decode(errors="replace")
-
-    def _send_cmd(self, cmd, timeout=None):
-        if self.debug:
-            print(f"[DEBUG] TX: {cmd}")
-
-        # Adjust timeout if requested
-        original_timeout = self.ser.timeout
-        if timeout is not None:
-            self.ser.timeout = timeout
-
-        try:
-            self.ser.reset_input_buffer()
-            self.ser.write(cmd.encode() + b"\n")
-            response = self._read_until_prompt()
-        finally:
-            # Restore original timeout
-            if timeout is not None:
-                self.ser.timeout = original_timeout
-
-        return response
-
-    def _check_response(self, response, expected_msg=None):
+    def _check_response(self, response: str, expected_msg: str = None) -> bool:
         if "error" in response.lower() or "failed" in response.lower():
-            log.error("Command failed. Output: %s", response)
+            LOG.error("Command failed. Output: %s", response)
             raise RuntimeError("Command failed")
         if expected_msg and expected_msg not in response:
-            log.warning(
+            LOG.error(
                 "Expected '%s' not found in response. Response: %s",
                 expected_msg,
                 response,
             )
-            return False
+            raise RuntimeError(f"Expected '{expected_msg}' not found")
         return True
 
     def fwup_start(self):
         """Start a FW update session"""
         cmd = f"{CMD_START}"
-        resp = self._send_cmd(cmd)
+        # Increase timeout as start might take longer
+        resp = self.device.send_command_raw(cmd, timeout=5.0)
         self._check_response(resp, "TPS_FWUP: Started")
         # Give some time for additional logs (like TFUs complete) to flush
         time.sleep(1)
@@ -108,14 +66,14 @@ class MauiSerialClient:
         """Send initiate command via TFU"""
         b64_data = base64.b64encode(data).decode("ascii")
         cmd = f"{CMD_SEND_INITIATE} {b64_data}"
-        resp = self._send_cmd(cmd)
+        resp = self.device.send_command_raw(cmd)
         self._check_response(resp, "TPS_FWUP: Send Initiate complete")
 
     def fwup_block(self, data: bytes):
         """Send block command via TFU"""
         b64_data = base64.b64encode(data).decode("ascii")
         cmd = f"{CMD_SEND_BLOCK} {b64_data}"
-        resp = self._send_cmd(cmd)
+        resp = self.device.send_command_raw(cmd)
         self._check_response(resp, "TPS_FWUP: Send Block complete")
 
     def fwup_stream(self, broadcast_address: int, data: bytes) -> int:
@@ -125,33 +83,29 @@ class MauiSerialClient:
         b64_data = base64.b64encode(buf).decode("ascii")
 
         cmd = f"{CMD_STREAM} {b64_data}"
-        resp = self._send_cmd(cmd)
+        resp = self.device.send_command_raw(cmd)
         self._check_response(resp)
 
         # Parse "TPS_FWUP: Stream - bytes written: <N>"
-        # Note: This relies on the firmware printing this exact string.
         match = re.search(r"TPS_FWUP: Stream - bytes written: (\d+)", resp)
         if match:
             return int(match.group(1))
 
-        # Fallback if pattern not found (e.g. older fw), though it should be there.
-        # This matches the behavior of the original library which parses the output.
-        log.warning("Could not parse bytes written from response")
+        LOG.warning("Could not parse bytes written from response. Resp: %r", resp)
         return len(data)
 
     def fwup_complete(self):
         """Finalize the update after all data is transferred"""
         # Extend the UART timeout because the validation and restart delay
         # steps take a long time (~7s + 5s)
-        resp = self._send_cmd(CMD_COMPLETE, timeout=16.0)
+        resp = self.device.send_command_raw(CMD_COMPLETE, timeout=16.0)
         self._check_response(resp, "TPS_FWUP: Success")
 
     def fwup_abort(self):
         """Try to recover the PDC subsystem after a failed update procedure"""
-        self._send_cmd(CMD_ABORT)
+        self.device.send_command_raw(CMD_ABORT)
 
 
-# Disable all the violations for keeping sync with sources
 # pylint: disable=all
 # Source: https://chromium.googlesource.com/chromiumos/platform/pdc/+/refs/heads/main/scripts/pdclib/console_fwup_tps.py
 class TfuiData:
@@ -214,7 +168,7 @@ class Tps6699xFirmwareUpdater:
     def _TFUD_DATA_AT(self, block: int) -> int:
         return self._TFUD_METADATA_OFFSET_AT(block) + self.TFUD_METADATA_LENGTH
 
-    def _APPCONFIG_DATA(self, fw_size: int, num_data_blocks: int) -> (int, int):
+    def _APPCONFIG_DATA(self, fw_size: int, num_data_blocks: int) -> Tuple[int, int]:
         # The Application Configuration is stored at the following offset:
         # FirmwareImageSize (Which excludes Header and App Config)
         # + 0x800 (Header Block Size)
@@ -263,7 +217,7 @@ class Tps6699xFirmwareUpdater:
 
                 # Show progress info every 4KB transferred
                 if ec_bytes_received > progress_log_target:
-                    log.info(
+                    LOG.info(
                         "%s: Progess: %d/%d bytes transferred (%.2f%%)",
                         stream_for,
                         progress_log_target,
@@ -282,14 +236,12 @@ class Tps6699xFirmwareUpdater:
             self.servo.fwup_block(tfud_buf)
             chunk_stream(msg_prefix, tfud.broadcast_address, stream_data)
 
-        log = logging.getLogger()
-
         try:
             # Start firmware update session
-            log.info("Starting firmware update session")
+            LOG.info("Starting firmware update session")
             self.servo.fwup_start()
 
-            log.info("Sending data blocks")
+            LOG.info("Sending data blocks")
             # Send TFUi command and then stream the header
             tfui_buf = self._read_data(
                 fw_image, self.TFUI_METADATA_OFFSET, self.TFUI_METADATA_LENGTH
@@ -311,7 +263,7 @@ class Tps6699xFirmwareUpdater:
                     self._TFUD_DATA_AT(block),
                 )
 
-            log.info("Sending appconfig")
+            LOG.info("Sending appconfig")
             # Last, do the appconfig region.
             fw_size_buf = self._read_data(fw_image, self.FW_SIZE_OFFSET, 4)
             (fw_size,) = struct.unpack("<I", fw_size_buf)
@@ -322,53 +274,15 @@ class Tps6699xFirmwareUpdater:
             do_tfud_block("Appconfig", metadata_offset, stream_data_offset)
 
             # Complete firmware update session
-            log.info("Finalizing firmware update. This may take a moment.")
+            LOG.info("Finalizing firmware update. This may take a moment.")
             self.servo.fwup_complete()
-            log.info("✅ Update succeeded")
-        except:
+            LOG.info("✅ Update succeeded")
+        except Exception:
             # In case of failure, try to recover the PDC subsystem
-            log.info("❌ Update failed. Attempting to recover PDC.")
+            LOG.info("❌ Update failed. Attempting to recover PDC.")
 
             self.servo.fwup_abort()
             raise
 
 
 # pylint: enable=all
-
-
-def main():
-    """Main entry point for the script."""
-    parser = argparse.ArgumentParser(description="Maui PDC Firmware Update Tool")
-    parser.add_argument("port", help="Serial port (e.g., /dev/ttyUSB0)")
-    parser.add_argument(
-        "fw_image",
-        help="Path to PDC firmware binary",
-    )
-    parser.add_argument(
-        "--baud", type=int, default=115200, help="Baud rate (default: 115200)"
-    )
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
-
-    args = parser.parse_args()
-
-    serial_client = MauiSerialClient(args.port, args.baud, args.debug)
-    updater = Tps6699xFirmwareUpdater(serial_client)
-
-    try:
-        with open(args.fw_image, "rb") as f:
-            fw_data = f.read()
-    except FileNotFoundError:
-        log.error("Error: File not found: %s", args.fw_image)
-        sys.exit(1)
-
-    log.info("Loaded firmware image: %d bytes", len(fw_data))
-
-    try:
-        updater.update(fw_data)
-        sys.exit(0)
-    except Exception:
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

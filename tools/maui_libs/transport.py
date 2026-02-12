@@ -32,7 +32,7 @@ MAUI_FINAL_PID = 0x5066  # Maui PID (placeholder)
 class MauiSerialTransport:
     """Manages serial communication with a Maui device."""
 
-    def __init__(self, port: str, baudrate: int = 115200, timeout: float = 1.0):
+    def __init__(self, port: str, baudrate: int = 115200, timeout: float = 3.0):
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
@@ -54,15 +54,19 @@ class MauiSerialTransport:
             self.ser.close()
             LOG.info("Disconnected from serial port %s", self.port)
 
-    def _read_until_prompt(self) -> str:
-        """Reads characters from serial until the shell prompt is encountered,
-        returning the content *before* the prompt itself."""
+    def _read_until_prompt(self) -> bytes:
+        """Reads bytes from serial until the shell prompt is encountered.
+        Returns the full raw byte buffer including the prompt."""
         buffer = b""
-        prompt_re = re.compile(b"maui\\$ *")
+        # Regex to match 'maui$' at the end, allowing for trailing spaces and ANSI codes (e.g. color reset)
+        prompt_re = re.compile(b"maui\\$(?:\\s|\\x1b\\[[0-9;]*m)*$")
         chunk_size = 64  # Read in chunks of 64 bytes
 
         while True:
-            chunk = self.ser.read(chunk_size)
+            # Read available bytes, or block for at least 1 byte if empty
+            n = self.ser.in_waiting or 1
+            chunk = self.ser.read(n)
+
             if not chunk:
                 if buffer:
                     LOG.warning(
@@ -74,16 +78,12 @@ class MauiSerialTransport:
                 break
             buffer += chunk
 
-            # Check for prompt anywhere in the buffer
+            # Check for prompt at the end of the buffer
             if prompt_re.search(buffer):
                 break
 
-        # Remove the prompt and any content after it
-        match = prompt_re.search(buffer)
-        if match:
-            return buffer[: match.start()].decode(errors="replace")
-        
-        return buffer.decode(errors="replace")
+        return buffer
+
     def _synchronize_shell(self):
         """Ensures the shell is in a known state (at prompt)."""
         if not self.ser or not self.ser.is_open:
@@ -105,13 +105,21 @@ class MauiSerialTransport:
         self.ser.reset_input_buffer()  # Clear buffer before sending
 
         self.ser.write(command.encode() + b"\n")
+        # Ensure command is sent before waiting for response
+        self.ser.flush()
 
-        # _read_until_prompt now returns content *before* the prompt
-        raw_response = self._read_until_prompt()
+        # _read_until_prompt returns raw bytes including prompt
+        raw_bytes = self._read_until_prompt()
+        raw_response = raw_bytes.decode(errors="replace")
 
         # Strip ANSI escape codes
         ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
         clean_response = ansi_escape.sub("", raw_response)
+
+        # Remove prompt from the end (more robust than line-by-line)
+        # We look for "maui$" with optional trailing space/newline at the end
+        prompt_re_str = re.compile(r"maui\$\s*[\r\n]*$")
+        clean_response = prompt_re_str.sub("", clean_response)
 
         # Split into lines for filtering
         lines = clean_response.splitlines()
@@ -122,6 +130,7 @@ class MauiSerialTransport:
         # Filter out the echoed command and any empty lines
         for line in lines:
             stripped_line = line.strip()
+
             # The echoed command is usually the first line matching the sent command
             if not echo_found and stripped_line == command.strip():
                 echo_found = True
@@ -134,6 +143,34 @@ class MauiSerialTransport:
 
         LOG.debug("Received (clean): %r", final_response)
         return final_response
+
+    def send_command_raw(self, command: str, timeout: float = None) -> str:
+        """
+        Sends a command and returns the raw output without any cleaning.
+        Useful for scripts that need to parse specific output formats or debug.
+        An optional `timeout` can be provided to override the default for this command.
+        """
+        if not self.ser or not self.ser.is_open:
+            raise serial.SerialException("Serial port not connected.")
+
+        LOG.debug("Sending (raw): %s", command)
+        self.ser.reset_input_buffer()
+
+        original_timeout = self.ser.timeout
+        if timeout is not None:
+            self.ser.timeout = timeout
+
+        try:
+            self.ser.write(command.encode() + b"\n")
+            self.ser.flush()
+            raw_bytes = self._read_until_prompt()
+            response = raw_bytes.decode(errors="replace")
+        finally:
+            # Restore original timeout
+            if timeout is not None:
+                self.ser.timeout = original_timeout
+
+        return response
 
 
 def list_maui_devices():
