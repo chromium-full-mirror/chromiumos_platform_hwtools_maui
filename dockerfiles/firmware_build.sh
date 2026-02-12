@@ -17,7 +17,10 @@ fi
 
 export HOME=/tmp
 git config --global --add safe.directory /zephyr/zephyr
+git config --global --add safe.directory /repo
 source /zephyr/zephyr/zephyr-env.sh
 cd /repo/firmware
-west build -b maui_proto -d build_docker $@
+chmod +x ./version.sh
+./version.sh
+west build -b maui_proto -d build_docker "$@"
 python3 /usr/local/bin/converter.py /repo/firmware/build_docker/zephyr/zephyr.bin /repo/firmware/build_docker/zephyr/zephyr.txt

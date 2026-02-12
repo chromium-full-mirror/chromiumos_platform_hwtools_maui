@@ -23,6 +23,7 @@ coverage.lcov
 /firmware/build
 /firmware/build_docker
 /firmware/tests/twister_outputs/*
+/firmware/src/app_version.h
 
 # Ignore tags for those using TAGS
 TAGS
