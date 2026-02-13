@@ -16,10 +16,9 @@ MCU Firmware:
     - control of on-board ICs: PDC, signal muxing, etc.
     - host interface
 Host Software:
-    - Linux-based tools
-    - Integration with standard Google debugging tools (adb, fastboot, servod),
-    - Provide maintenance tools: all system components firmware updates, managing in fleet
-    - General host interface for additional features: remote DUT disconnection, etc.
+    - Linux-based tools (CLI)
+    - Distributed via Docker container
+    - Handles FW updates and device control (Integration with standard Google debugging tools)
 
 ## Directory Structure
 
@@ -27,96 +26,92 @@ Host Software:
     *   `src/`: Application source code and internal drivers.
     *   `boards/`: Board definitions (devicetree, Kconfig defconfig).
     *   `dts/`: Custom Device Tree bindings.
-*   `dockerfiles/`: Docker definitions for build and test environments.
+*   `dockerfiles/`: Docker definitions.
+    *   `Dockerfile.fw_builder`: For building firmware.
+    *   `Dockerfile.utils`: For host tools container (`maui-utils`).
 *   `tools/`: Host-side tools and scripts.
+    *   `maui_libs/`: Core Python libraries (Device abstraction, Transport, PDC update logic).
+    *   `src/`: Python CLI implementations (`maui_ctl.py`, `maui_flash.py`).
+    *   `scripts/`: User-facing Bash wrapper scripts (`maui-ctl`, `maui-flash`, `maui_image_manager.py`).
+    *   `tests/`: Unit tests for host tools.
+
+## Host Software Architecture
+
+The host software is designed to be "Docker-first" to minimize dependencies on user machines.
+
+*   **Wrapper Scripts**: Users interact with `tools/scripts/maui-ctl` and `maui-flash`.
+    *   These scripts automatically fetch the `maui-utils` Docker image from a public GCS bucket (`gs://maui-firmware`) or use a local build.
+    *   They invoke the tool inside the container, mapping serial ports (`/dev`) and file arguments appropriately.
+*   **Image Management**: `maui_image_manager.py` (Python standard lib only) handles resolving tags (e.g., `stable`) to versions via GCS XML parsing and downloading the image.
+*   **maui-libs**: The core logic is in Python (`maui_libs`).
+    *   Uses `pyserial` for communication.
+    *   `MauiSerialTransport` supports raw command mode for binary protocols.
+*   **maui-flash**: Unified updater.
+    *   **PDC**: Updates via serial passthrough commands using `maui_libs.pdc` (ported from legacy scripts).
+    *   **MCU**: Orchestrates the Rust-based `fw-updater` tool (installed inside the container) to flash via BSL.
 
 ## Build Instructions
 
+### Firmware
 The firmware is built using the `maui-builder` Docker container.
 
 To build the firmware:
 ```bash
 docker run --rm -v $(pwd):/repo maui-builder:latest
 ```
+Artifacts: `firmware/build_docker/zephyr/zephyr.txt`.
 
-This will generate the build artifacts in `firmware/build_docker/`.
-
-## Development Guidelines
-
-### GPIO Handling
-The project uses a custom internal driver for GPIO management to simplify access and configuration.
-
-1.  **Definition**: All GPIOs must be defined in the `gpio.dtsi` file under the `google,maui-gpios` compatible node.
-2.  **Naming**: Use descriptive node names. The driver automatically generates an enum value for each GPIO based on its node name (converted to uppercase and prefixed with `GPIO_`).
-    *   Example: Node `usb3_mux_sel` becomes `GPIO_USB3_MUX_SEL`.
-3.  **Access**: Do **not** use standard Zephyr `gpio_dt_spec` or `device_get_binding` for these GPIOs in application code.
-    *   Include `firmware/src/gpio.h`.
-    *   Use `gpio_set(GPIO_ENUM_NAME, val)` to set output values.
-    *   Use `gpio_get(GPIO_ENUM_NAME)` to read input values.
-
-### Application Logic & Drivers
-*   **Logic Modules**: For application logic (e.g., controlling muxes, handling state machines based on ADC inputs), prefer creating simple modules initialized via `SYS_INIT`. Avoid creating full Zephyr Device Drivers (using `DEVICE_DT_INST_DEFINE`) unless the module strictly represents a hardware peripheral requiring that model.
-*   **Configuration**: Use `Kconfig` for tunable parameters (e.g., timing delays, voltage thresholds) rather than Device Tree properties, especially for logic modules that don't have a direct hardware representation in the DT.
+### Host Tools Container
+To build the `maui-utils` container locally (for development):
+```bash
+docker build -t maui-utils -f dockerfiles/Dockerfile.utils .
+```
 
 ## Flashing the Firmware
 
-TBD
+Use the `maui-flash` tool.
+
+*   **Update All (Recommended)**: `./tools/scripts/maui-flash all` (Fetches stable from cloud. `--serial <SN>` is optional, required only if multiple devices are connected).
+*   **MCU (Local)**: `./tools/scripts/maui-flash mcu --file path/to/zephyr.txt` (`--serial <SN>` is optional).
+*   **PDC (Local)**: `./tools/scripts/maui-flash pdc --file path/to/pdc.bin` (`--serial <SN>` is optional).
 
 ## Serial Console
 
-TBD
+The Maui device exposes a serial console (via FTDI or native USB CDC).
+*   **Baudrate**: 115200
+*   **Prompt**: `maui$`
+*   **Usage**: The console is used by `maui-ctl` for status/control (`--serial <SN>` is optional) and `maui-flash` for PDC updates.
+
+## Development Guidelines
+
+### GPIO Handling (Firmware)
+*   Use `firmware/src/gpio.h` and `gpio_set`/`gpio_get`.
+*   Define GPIOs in `gpio.dtsi` under `google,maui-gpios`.
+
+### Application Logic (Firmware)
+*   Prefer `SYS_INIT` modules over full Zephyr Drivers for logic.
+*   Use `Kconfig` for tunable parameters.
+
+### Host Scripts
+*   **Wrappers**: Use Bash for top-level wrappers.
+*   **Helpers**: Use Python (standard library only) for complex logic like GCS fetching (`maui_image_manager.py`) to ensure portability.
+*   **Core Logic**: Use Python (`maui_libs`) with dependencies (`pyserial`, `pyusb`) inside the Docker container.
 
 ## Testing Strategy
 
-The project utilizes the Zephyr Twister framework for unit testing application logic.
+### Firmware Unit Tests
+*   **Framework**: Zephyr Twister (Ztest).
+*   **Run**: `docker run --rm -v $(pwd):/repo --entrypoint /firmware_test.sh maui-builder`
 
-### Unit Tests
-- **Location:** `firmware/tests/unit/`
-- **Framework:** Zephyr Ztest + Twister
-- **Target Platform:** `native_sim` (simulates execution on the host machine).
+### Host Tools Unit Tests
+*   **Framework**: Python `unittest`.
+*   **Run**: `docker run --rm -v $(pwd):/repo -w /repo maui-utils python3 -m unittest discover tools/tests`
 
-### Creating Unit Tests
-When creating new unit tests, follow this structure:
+## GCS Bucket Structure (Public)
 
-1.  **Directory:** `firmware/tests/unit/<component>/`
-2.  **Configuration (`testcase.yaml`):**
-    ```yaml
-    tests:
-      <component>.basic:
-        tags: test_framework
-        platform_allow: native_sim
-        integration_platforms:
-          - native_sim
-    ```
-3.  **Project Config (`prj.conf`):**
-    ```
-    CONFIG_ZTEST=y
-    ```
-4.  **Build (`CMakeLists.txt`):**
-    Link the specific source files from the main firmware that need to be tested.
-    ```cmake
-    cmake_minimum_required(VERSION 3.20.0)
-    find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-    project(my_test)
-
-    target_sources(app PRIVATE src/main.c)
-    target_sources(app PRIVATE ../../../src/target_file.c) # Add file under test
-    target_include_directories(app PRIVATE ../../../src)
-    ```
-5.  **Source (`src/main.c`):** Use `ZTEST` macros.
-
-### Executing Tests
-Tests are run using the `maui-builder` Docker container. The `firmware_test.sh` script inside the container handles the environment setup.
-
-To run all tests:
-```bash
-docker run --rm -v $(pwd):/repo --entrypoint /firmware_test.sh maui-builder
-```
-
-To run specific tests or pass arguments:
-```bash
-docker run --rm -v $(pwd):/repo --entrypoint /firmware_test.sh maui-builder -s <test_suite> -v
-```
+*   **Bucket**: `gs://maui-firmware`
+*   **Firmware**: `{component}-fw/{version}/{file}` (Tags via marker files like `stable.pdcfw`).
+*   **Docker**: `docker/{version}/maui-utils.tar` (Tags via marker files like `stable.dockertag`).
 
 ## Git Conventions
 
