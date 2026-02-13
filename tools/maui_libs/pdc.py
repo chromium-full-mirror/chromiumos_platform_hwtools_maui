@@ -14,14 +14,13 @@ import logging
 import re
 import struct
 import time
-from typing import Tuple
 from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     from maui_libs.device import MauiDevice
 
-LOG = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # TPS6699x Constants
 CMD_START = "pdc_tps_fwup start"
@@ -42,10 +41,10 @@ class MauiPdcClientAdapter:
 
     def _check_response(self, response: str, expected_msg: str = None) -> bool:
         if "error" in response.lower() or "failed" in response.lower():
-            LOG.error("Command failed. Output: %s", response)
+            logger.error("Command failed. Output: %s", response)
             raise RuntimeError("Command failed")
         if expected_msg and expected_msg not in response:
-            LOG.error(
+            logger.error(
                 "Expected '%s' not found in response. Response: %s",
                 expected_msg,
                 response,
@@ -91,7 +90,7 @@ class MauiPdcClientAdapter:
         if match:
             return int(match.group(1))
 
-        LOG.warning("Could not parse bytes written from response. Resp: %r", resp)
+        logger.warning("Could not parse bytes written from response. Resp: %r", resp)
         return len(data)
 
     def fwup_complete(self):
@@ -106,6 +105,7 @@ class MauiPdcClientAdapter:
         self.device.send_command_raw(CMD_ABORT)
 
 
+# Disable all the violations for keeping sync with sources
 # pylint: disable=all
 # Source: https://chromium.googlesource.com/chromiumos/platform/pdc/+/refs/heads/main/scripts/pdclib/console_fwup_tps.py
 class TfuiData:
@@ -168,7 +168,7 @@ class Tps6699xFirmwareUpdater:
     def _TFUD_DATA_AT(self, block: int) -> int:
         return self._TFUD_METADATA_OFFSET_AT(block) + self.TFUD_METADATA_LENGTH
 
-    def _APPCONFIG_DATA(self, fw_size: int, num_data_blocks: int) -> Tuple[int, int]:
+    def _APPCONFIG_DATA(self, fw_size: int, num_data_blocks: int) -> (int, int):
         # The Application Configuration is stored at the following offset:
         # FirmwareImageSize (Which excludes Header and App Config)
         # + 0x800 (Header Block Size)
@@ -217,7 +217,7 @@ class Tps6699xFirmwareUpdater:
 
                 # Show progress info every 4KB transferred
                 if ec_bytes_received > progress_log_target:
-                    LOG.info(
+                    logger.info(
                         "%s: Progess: %d/%d bytes transferred (%.2f%%)",
                         stream_for,
                         progress_log_target,
@@ -238,10 +238,10 @@ class Tps6699xFirmwareUpdater:
 
         try:
             # Start firmware update session
-            LOG.info("Starting firmware update session")
+            logger.info("Starting firmware update session")
             self.servo.fwup_start()
 
-            LOG.info("Sending data blocks")
+            logger.info("Sending data blocks")
             # Send TFUi command and then stream the header
             tfui_buf = self._read_data(
                 fw_image, self.TFUI_METADATA_OFFSET, self.TFUI_METADATA_LENGTH
@@ -263,7 +263,7 @@ class Tps6699xFirmwareUpdater:
                     self._TFUD_DATA_AT(block),
                 )
 
-            LOG.info("Sending appconfig")
+            logger.info("Sending appconfig")
             # Last, do the appconfig region.
             fw_size_buf = self._read_data(fw_image, self.FW_SIZE_OFFSET, 4)
             (fw_size,) = struct.unpack("<I", fw_size_buf)
@@ -274,12 +274,12 @@ class Tps6699xFirmwareUpdater:
             do_tfud_block("Appconfig", metadata_offset, stream_data_offset)
 
             # Complete firmware update session
-            LOG.info("Finalizing firmware update. This may take a moment.")
+            logger.info("Finalizing firmware update. This may take a moment.")
             self.servo.fwup_complete()
-            LOG.info("✅ Update succeeded")
+            logger.info("✅ Update succeeded")
         except Exception:
             # In case of failure, try to recover the PDC subsystem
-            LOG.info("❌ Update failed. Attempting to recover PDC.")
+            logger.info("❌ Update failed. Attempting to recover PDC.")
 
             self.servo.fwup_abort()
             raise

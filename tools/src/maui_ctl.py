@@ -1,4 +1,4 @@
-# Copyright 2026 The ChromiumOS Authors
+# Copyright 2025 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,7 +17,7 @@ import sys
 from maui_libs.device import MauiDevice
 
 
-LOG = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -63,19 +63,19 @@ def main():
         device.connect()
 
         if args.command == "status":
-            LOG.info("Fetching device status...")
+            logger.info("Fetching device status...")
             response = device.send_command("version")
-            LOG.info("Device Version: %s", response.strip())
+            logger.info("Device Version: %s", response.strip())
         elif args.command == "power":
-            LOG.info("Power command (%s) not yet supported by firmware.", args.state)
+            logger.info("Power command (%s) not yet supported by firmware.", args.state)
         elif args.command == "data":
-            LOG.info("Data command (%s) not yet supported by firmware.", args.state)
+            logger.info("Data command (%s) not yet supported by firmware.", args.state)
 
     except RuntimeError as e:
-        LOG.error("Command failed: %s", e)
+        logger.error("Command failed: %s", e)
         sys.exit(1)
     except Exception as e:  # pylint: disable=broad-exception-caught
-        LOG.critical("An unexpected error occurred: %s", e, exc_info=True)
+        logger.critical("An unexpected error occurred: %s", e, exc_info=True)
         sys.exit(1)
     finally:
         if device and device.is_connected:

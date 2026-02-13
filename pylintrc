@@ -68,6 +68,7 @@ ignored-modules=
    grpc_reflection.v1alpha,
    paramiko,
    serial,
+   maui_libs,
 
 # Python code to execute, usually for sys.path manipulation such as
 # pygtk.require().

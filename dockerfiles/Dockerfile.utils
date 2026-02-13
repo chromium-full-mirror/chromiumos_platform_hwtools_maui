@@ -1,6 +1,7 @@
-# Copyright 2025 The ChromiumOS Authors
+# Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+# Updated comment to force cache bust.
 #
 # syntax=docker/dockerfile:1
 # Base image
@@ -12,6 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install dependencies
 # fw-updater needs libudev-dev and pkg-config for building
 # git and curl for fetching source and rustup
+# Python tools need python3, pip, serial, usb
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
@@ -19,6 +21,11 @@ RUN apt-get update && apt-get install -y \
     libudev-dev \
     pkg-config \
     ca-certificates \
+    python3 \
+    python3-pip \
+    python3-serial \
+    python3-requests \
+    python3-usb \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust using rustup
@@ -41,5 +48,25 @@ RUN cp target/release/fw-updater /usr/local/bin/fw-updater
 WORKDIR /
 RUN rm -rf /usr/src/dolos
 
-# Set the default entrypoint or command
-CMD ["fw-updater", "--help"]
+# Copy Maui Tools
+COPY tools /opt/maui/tools
+
+# Configure Python Path for maui_libs
+ENV PYTHONPATH="/opt/maui/tools:${PYTHONPATH}"
+
+# Create wrappers for CLI tools using heredoc
+WORKDIR /opt/maui/tools
+RUN cat << 'EOF' > /usr/local/bin/maui-ctl && \
+    chmod +x /usr/local/bin/maui-ctl
+#!/bin/bash
+python3 /opt/maui/tools/src/maui_ctl.py "$@"
+EOF
+
+RUN cat << 'EOF' > /usr/local/bin/maui-flash && \
+    chmod +x /usr/local/bin/maui-flash
+#!/bin/bash
+python3 /opt/maui/tools/src/maui_flash.py "$@"
+EOF
+
+# Set the default entrypoint
+CMD ["/bin/bash"]

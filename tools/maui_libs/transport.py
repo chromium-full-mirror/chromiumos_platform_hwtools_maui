@@ -19,7 +19,7 @@ import usb.core
 import usb.util
 
 
-LOG = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Maui Device Identification
 MAUI_PROTO_FTDI_VID = 0x0403
@@ -41,26 +41,35 @@ class MauiSerialTransport:
     def connect(self):
         """Establishes a serial connection."""
         try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
-            LOG.info("Connected to serial port %s", self.port)
+            self.ser = serial.Serial(
+                self.port,
+                self.baudrate,
+                timeout=self.timeout,
+                xonxoff=False,
+                rtscts=False,
+                dsrdtr=False,
+            )
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+            logger.info("Connected to serial port %s", self.port)
             self._synchronize_shell()
         except serial.SerialException as e:
-            LOG.error("Failed to connect to %s: %s", self.port, e)
+            logger.error("Failed to connect to %s: %s", self.port, e)
             raise
 
     def disconnect(self):
         """Closes the serial connection."""
         if self.ser and self.ser.is_open:
             self.ser.close()
-            LOG.info("Disconnected from serial port %s", self.port)
+            logger.info("Disconnected from serial port %s", self.port)
 
     def _read_until_prompt(self) -> bytes:
         """Reads bytes from serial until the shell prompt is encountered.
         Returns the full raw byte buffer including the prompt."""
         buffer = b""
-        # Regex to match 'maui$' at the end, allowing for trailing spaces and ANSI codes (e.g. color reset)
+        # Regex to match 'maui$' at the end,
+        # allowing for trailing spaces and ANSI codes (e.g. color reset)
         prompt_re = re.compile(b"maui\\$(?:\\s|\\x1b\\[[0-9;]*m)*$")
-        chunk_size = 64  # Read in chunks of 64 bytes
 
         while True:
             # Read available bytes, or block for at least 1 byte if empty
@@ -69,12 +78,12 @@ class MauiSerialTransport:
 
             if not chunk:
                 if buffer:
-                    LOG.warning(
+                    logger.warning(
                         "Timeout while waiting for prompt. Received buffer: %r",
                         buffer,
                     )
                 else:
-                    LOG.warning("Timeout while waiting for prompt. Buffer empty.")
+                    logger.warning("Timeout while waiting for prompt. Buffer empty.")
                 break
             buffer += chunk
 
@@ -101,7 +110,7 @@ class MauiSerialTransport:
         if not self.ser or not self.ser.is_open:
             raise serial.SerialException("Serial port not connected.")
 
-        LOG.debug("Sending: %s", command)
+        logger.debug("Sending: %s", command)
         self.ser.reset_input_buffer()  # Clear buffer before sending
 
         self.ser.write(command.encode() + b"\n")
@@ -141,7 +150,7 @@ class MauiSerialTransport:
 
         final_response = "\n".join(clean_lines).strip()
 
-        LOG.debug("Received (clean): %r", final_response)
+        logger.debug("Received (clean): %r", final_response)
         return final_response
 
     def send_command_raw(self, command: str, timeout: float = None) -> str:
@@ -153,7 +162,7 @@ class MauiSerialTransport:
         if not self.ser or not self.ser.is_open:
             raise serial.SerialException("Serial port not connected.")
 
-        LOG.debug("Sending (raw): %s", command)
+        logger.debug("Sending (raw): %s", command)
         self.ser.reset_input_buffer()
 
         original_timeout = self.ser.timeout
@@ -229,8 +238,10 @@ def list_maui_devices():
                 }
             )
     except usb.core.NoBackendError:
-        LOG.warning("libusb backend not found. Native USB discovery might be limited.")
+        logger.warning(
+            "libusb backend not found. Native USB discovery might be limited."
+        )
     except usb.core.USBError as e:
-        LOG.error("USB error during native USB device discovery: %s", e)
+        logger.error("USB error during native USB device discovery: %s", e)
 
     return devices

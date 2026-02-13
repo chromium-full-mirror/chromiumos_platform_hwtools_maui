@@ -17,7 +17,7 @@ from maui_libs.transport import list_maui_devices
 from maui_libs.transport import MauiSerialTransport
 
 
-LOG = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class MauiDevice:
@@ -43,15 +43,16 @@ class MauiDevice:
         else:
             self._transport = None
             self.is_connected = False
-            LOG.warning(
-                "MauiDevice initialized without a port. Connection methods will not work."
+            logger.warning(
+                "MauiDevice initialized without a port. "
+                "Connection methods will not work."
             )
 
     def connect(self):
         """Connects to the device's serial transport."""
         if not self._transport:
             raise NotImplementedError(
-                "Cannot connect to this device type (no serial port available)."
+                "Can't connect to this device type (no serial port available)."
             )
         if not self.is_connected:
             self._transport.connect()
@@ -88,8 +89,14 @@ class MauiDevice:
         available_devices = list_maui_devices()
 
         if not available_devices:
-            LOG.error("No Maui devices found. Ensure it is connected and recognized by the system.")
-            raise RuntimeError("No Maui devices found. Ensure it is connected and recognized by the system.")
+            logger.error(
+                "No Maui devices found."
+                " Ensure it is connected and recognized by the system."
+            )
+            raise RuntimeError(
+                "No Maui devices found."
+                " Ensure it is connected and recognized by the system."
+            )
 
         if serial_number:
             # Try to find the specific device
@@ -98,9 +105,10 @@ class MauiDevice:
                     if not dev_info.get("port"):
                         raise NotImplementedError(
                             f"Device {serial_number} is a native USB device "
-                            "and does not currently support direct serial communication."
+                            "and does not currently support direct serial"
+                            " communication."
                         )
-                    LOG.info(
+                    logger.info(
                         "Found specified Maui device: %s on %s",
                         serial_number,
                         dev_info["port"],
@@ -112,18 +120,21 @@ class MauiDevice:
                         vid=dev_info["vid"],
                         pid=dev_info["pid"],
                     )
-            LOG.error("Maui device with serial %s not found.", serial_number)
-            raise RuntimeError(f"Device with serial number '{serial_number}' not found. Please check the serial number and try again.")
+            logger.error("Maui device with serial %s not found.", serial_number)
+            raise RuntimeError(
+                f"Device with serial number '{serial_number}' not found."
+                " Please check the serial number and try again."
+            )
 
         # Handle multiple devices without a serial number specified
         if len(available_devices) > 1:
-            LOG.error(
+            logger.error(
                 "Multiple Maui devices detected. Please specify a serial "
                 "number using --serial to select your target device."
             )
-            LOG.info("Available devices:")
+            logger.info("Available devices:")
             for dev_info in available_devices:
-                LOG.info(
+                logger.info(
                     "  Serial: %s, Type: %s, Port: %s, VID: %s, PID: %s",
                     dev_info.get("serial_number", "No Serial Number"),
                     dev_info["type"],
@@ -131,16 +142,20 @@ class MauiDevice:
                     dev_info["vid"],
                     dev_info["pid"],
                 )
-            raise RuntimeError("Multiple Maui devices detected. Use --serial to specify your target device.")
+            raise RuntimeError(
+                "Multiple Maui devices detected."
+                " Use --serial to specify your target device."
+            )
 
         # Exactly one device found, no serial specified
         dev_info = available_devices[0]
         if not dev_info.get("port"):
             raise NotImplementedError(
-                f"Found a native USB device (Serial: {dev_info.get("serial_number", "No Serial Number")}) "
+                f"Found a native USB device "
+                f"(Serial: {dev_info.get("serial_number","No Serial Number")}) "
                 "which does not currently support direct serial communication."
             )
-        LOG.info(
+        logger.info(
             "Found single Maui device: %s on %s",
             dev_info.get("serial_number", "No Serial Number"),
             dev_info["port"],

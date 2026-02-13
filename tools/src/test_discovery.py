@@ -13,11 +13,10 @@ import argparse
 import logging
 import sys
 
-# pylint: disable=import-error
 from maui_libs.device import MauiDevice
 
 
-LOG = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -31,18 +30,18 @@ def main():
 
     try:
         device = MauiDevice.find_device(serial_number=args.serial)
-        LOG.info("Successfully found and initialized Maui device:")
-        LOG.info("  Serial Number: %s", device.serial_number)
-        LOG.info("  Port: %s", device.port)
-        LOG.info("  Type: %s", device.device_type)
-        LOG.info("  VID: %s", device.vid)
-        LOG.info("  PID: %s", device.pid)
+        logger.info("Successfully found and initialized Maui device:")
+        logger.info("  Serial Number: %s", device.serial_number)
+        logger.info("  Port: %s", device.port)
+        logger.info("  Type: %s", device.device_type)
+        logger.info("  VID: %s", device.vid)
+        logger.info("  PID: %s", device.pid)
 
     except RuntimeError as e:
-        LOG.error("Discovery failed: %s", e)
+        logger.error("Discovery failed: %s", e)
         sys.exit(1)
     except Exception as e:  # pylint: disable=broad-exception-caught
-        LOG.critical("An unexpected error occurred: %s", e)
+        logger.critical("An unexpected error occurred: %s", e)
         sys.exit(1)
 
 

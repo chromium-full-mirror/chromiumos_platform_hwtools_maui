@@ -11,6 +11,28 @@ Host Software:
     - Provide maintenance tools: all system components firmware updates, managing in fleet
     - General host interface for additional features: remote DUT disconnection, etc.
 
+## Quick Start
+
+Get the code and update your Maui device to the latest stable firmware:
+
+```shell
+# 1. Clone the repository
+git clone https://chromium.googlesource.com/chromiumos/platform/hwtools/maui
+cd maui
+
+# 2. Update all firmware components (MCU & PDC) to the latest stable version
+
+./tools/scripts/maui-flash all
+
+# Note: You may need to provide your device serial number if multiple devices are connected.
+./tools/scripts/maui-flash all --serial <SERIAL>
+
+# 3. Verify device status / FW version
+./tools/scripts/maui-ctl status
+```
+
+For detailed usage of the host tools, see [tools/README.md](tools/README.md).
+
 ## Getting started
 
 Create a directory to checkout the Maui source:
@@ -80,24 +102,11 @@ docker run --rm -v $(pwd):/repo --entrypoint /firmware_test.sh maui-builder -s u
 
 ## Host Tools & Firmware Update
 
-### Building the Utils Container
-The project includes a utility container for host-side tools like `fw-updater`.
-The container is automatically built when running the wrapper scripts, but can be built manually:
+The project includes host-side tools for managing the device and updating firmware. These tools are distributed via a Docker container (`maui-utils`) which is automatically fetched or built by the wrapper scripts.
 
-```shell
-docker build -t maui-utils -f dockerfiles/Dockerfile.utils .
-```
+See [tools/README.md](tools/README.md) for full documentation.
 
-### Updating Firmware
-To update the firmware using the `fw-updater` tool (wrapped in the utility container):
+### Common Commands
 
-```shell
-./tools/scripts/fw-updater <firmware_image> [options]
-```
-
-The script automatically handles mounting the firmware file into the container, so you can pass the path to the file on your host machine directly.
-
-Example:
-```shell
-./tools/scripts/fw-updater firmware/build_docker/zephyr/zephyr.txt -u /dev/ttyUSB0
-```
+*   **Update Everything (Stable):** `./tools/scripts/maui-flash all`
+*   **Check Status:** `./tools/scripts/maui-ctl status`
