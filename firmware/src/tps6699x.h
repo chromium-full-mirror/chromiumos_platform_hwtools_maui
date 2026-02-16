@@ -114,4 +114,34 @@ int tps_cmd_sbud(const struct device *dev, uint8_t en);
  */
 int tps_cmd_sbdf(const struct device *dev, uint8_t flip);
 
+/**
+ * @brief Structure to hold decoded identity information
+ */
+struct tps_pd_identity {
+	bool usb_host;
+	bool usb_device;
+	uint16_t vid;
+	uint16_t pid;
+};
+
+/**
+ * @brief Issue Discovery Identity command and get raw response
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param rx_id Pointer to store the raw identity register content
+ *
+ * @return 0 on success, else negative error code
+ */
+int tps_discover_identity(const struct device *dev,
+			  union reg_rx_identity_sop *rx_id);
+
+/**
+ * @brief Decode raw identity register into structured data
+ *
+ * @param rx_id Pointer to the raw identity register content
+ * @param id Pointer to the structure to fill with decoded data
+ */
+void tps_decode_identity(const union reg_rx_identity_sop *rx_id,
+			 struct tps_pd_identity *id);
+
 #endif /* ZEPHYR_DRIVERS_USBC_TPS6699X_H_ */

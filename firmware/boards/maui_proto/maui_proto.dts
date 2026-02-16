@@ -101,6 +101,7 @@
 	pdc: tps6699x@20 {
 		compatible = "ti,tps6699x";
 		reg = <0x20>;
+		irq-gpios = <&gpioa 28 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 	};
 };
 

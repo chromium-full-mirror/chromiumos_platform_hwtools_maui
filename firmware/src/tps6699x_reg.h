@@ -200,10 +200,14 @@ enum command_task {
 	COMMAND_TASK_TFUQ = TASK_TO_UINT32('T', 'F', 'U', 'q'),
 	/* Abort current task */
 	COMMAND_TASK_ABRT = TASK_TO_UINT32('A', 'B', 'R', 'T'),
+	/* Start discovery process */
+	COMMAND_TASK_AMDS = TASK_TO_UINT32('A', 'M', 'D', 's'),
 	/* SBUd command */
 	COMMAND_TASK_SBUD = TASK_TO_UINT32('S', 'B', 'U', 'd'),
 	/* SBDF command */
 	COMMAND_TASK_SBDF = TASK_TO_UINT32('S', 'B', 'D', 'F'),
+	/* Send VDM */
+	COMMAND_TASK_VDMS = TASK_TO_UINT32('V', 'D', 'M', 's'),
 };
 BUILD_ASSERT(sizeof(enum command_task) == sizeof(uint32_t));
 
@@ -386,6 +390,19 @@ union reg_interrupt {
 		uint8_t reserved17 : 2;
 	} __packed;
 	uint8_t raw_value[11];
+};
+
+/**
+ * @brief 4.49 Received SOP Identity Data Object Register (Offset = 48h)
+ */
+union reg_rx_identity_sop {
+	struct {
+		uint8_t num_valid_vdos : 3;
+		uint8_t reserved : 3;
+		uint8_t response_type : 2;
+		uint32_t vdo[6];
+	} __packed;
+	uint8_t raw_value[25];
 };
 
 #endif /* ZEPHYR_DRIVERS_USBC_TPS6699X_REG_H_ */

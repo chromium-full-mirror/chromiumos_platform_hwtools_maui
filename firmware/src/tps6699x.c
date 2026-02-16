@@ -11,6 +11,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
@@ -36,19 +37,30 @@ LOG_MODULE_REGISTER(tps6699x, CONFIG_LOG_DEFAULT_LEVEL);
 
 struct tps6699x_config {
 	struct i2c_dt_spec i2c;
+#ifdef CONFIG_TPS6699X_INTERRUPT
+	struct gpio_dt_spec irq_gpio;
+#endif
 };
 
 struct tps6699x_data {
 	struct k_mutex lock;
+#ifdef CONFIG_TPS6699X_INTERRUPT
+	struct k_work irq_work;
+	struct gpio_callback irq_cb;
+#endif
+	const struct device *dev;
 };
 
 static const struct tps6699x_config tps6699x_config = {
 	.i2c = I2C_DT_SPEC_INST_GET(0),
+#ifdef CONFIG_TPS6699X_INTERRUPT
+	.irq_gpio = GPIO_DT_SPEC_INST_GET(0, irq_gpios),
+#endif
 };
 
 static struct tps6699x_data tps6699x_data;
 
-#if IS_ENABLED(CONFIG_PDC_DEBUG)
+#ifdef CONFIG_PDC_DEBUG
 
 const struct device *tps_uart = DEVICE_DT_GET(DT_NODELABEL(uart1));
 
@@ -428,6 +440,144 @@ int tps_cmd_sbdf(const struct device *dev, uint8_t flip)
 	return ret;
 }
 
+int tps_discover_identity(const struct device *dev,
+			  union reg_rx_identity_sop *rx_id)
+{
+	const struct tps6699x_config *config = dev->config;
+	struct tps6699x_data *data = dev->data;
+	int rv;
+
+	/* Issue the AMDS task to start discovery */
+	rv = run_task_sync(dev, COMMAND_TASK_AMDS, NULL, 0, 0, NULL);
+	if (rv) {
+		return rv;
+	}
+
+	/* Read the result from the register */
+	k_mutex_lock(&data->lock, K_FOREVER);
+	rv = tps_read_reg(&config->i2c, REG_RECEIVED_SOP_IDENTITY_DATA_OBJECT,
+			  rx_id->raw_value, sizeof(union reg_rx_identity_sop));
+	k_mutex_unlock(&data->lock);
+
+	return rv;
+}
+
+void tps_decode_identity(const union reg_rx_identity_sop *rx_id,
+			 struct tps_pd_identity *id)
+{
+	memset(id, 0, sizeof(*id));
+
+	if (rx_id->response_type != 1) { /* Not ACK */
+		return;
+	}
+
+	if (rx_id->num_valid_vdos > 0) {
+		/* ID Header VDO is at index 0 */
+		uint32_t id_header = rx_id->vdo[0];
+
+		id->usb_host = (id_header >> 31) & 1;
+		id->usb_device = (id_header >> 30) & 1;
+		id->vid = id_header & 0xFFFF;
+	}
+
+	if (rx_id->num_valid_vdos > 2) {
+		/* Product VDO is at index 2 */
+		uint32_t product_vdo = rx_id->vdo[2];
+
+		id->pid = (product_vdo >> 16) & 0xFFFF;
+	}
+}
+
+#ifdef CONFIG_TPS6699X_INTERRUPT
+static void tps_handle_new_contract_as_producer(struct tps6699x_data *data)
+{
+	const struct device *dev = data->dev;
+	int rv;
+	union reg_rx_identity_sop rx_id;
+	struct tps_pd_identity id;
+
+	LOG_INF("Handling New Contract As Provider");
+
+	/* Issue the AMDs 4CC command to force discovery */
+	rv = tps_discover_identity(dev, &rx_id);
+	if (rv) {
+		LOG_ERR("Failed to discover identity: %d", rv);
+		return;
+	}
+
+	tps_decode_identity(&rx_id, &id);
+
+	/*
+	 * If the device is identified as a Phone toggle the Mux GPIO.
+	 * It is not implemented on HW yet, so print and placeholder only.
+	 */
+	if (id.usb_host == 1 && id.usb_device == 1) {
+		LOG_INF("Detected Android Phone");
+		LOG_INF("Toggle Mux GPIO to Direct Device Mode");
+	} else if (id.usb_host == 1 && id.usb_device == 0) {
+		LOG_INF("Detected Chromebook");
+		LOG_INF("Keep Mux in Host-to-Host Bridge Mode");
+	} else {
+		LOG_INF("Detected Unknown Device (Host=%d, Dev=%d)",
+			id.usb_host, id.usb_device);
+	}
+}
+
+static void tps_irq_work_handler(struct k_work *work)
+{
+	struct tps6699x_data *data =
+		CONTAINER_OF(work, struct tps6699x_data, irq_work);
+	const struct device *dev = data->dev;
+	const struct tps6699x_config *config = dev->config;
+	union reg_interrupt irq_evt1 = { 0 };
+	int rv;
+	int i;
+	bool irq1_pending = false;
+
+	/* Read the pending interrupt events */
+	k_mutex_lock(&data->lock, K_FOREVER);
+	rv = tps_read_reg(&config->i2c, REG_INTERRUPT_EVENT_FOR_I2C1,
+			  irq_evt1.raw_value, sizeof(union reg_interrupt));
+	k_mutex_unlock(&data->lock);
+	if (rv) {
+		LOG_ERR("Read IRQ1 events failed (%d)", rv);
+		return;
+	}
+
+	/* Check for pending events in I2C1 */
+	for (i = 0; i < sizeof(union reg_interrupt); i++) {
+		if (irq_evt1.raw_value[i]) {
+			irq1_pending = true;
+		}
+	}
+
+	if (irq1_pending) {
+		LOG_DBG("IRQ1 Event: 0x%02x%02x%02x%02x...",
+			irq_evt1.raw_value[0], irq_evt1.raw_value[1],
+			irq_evt1.raw_value[2], irq_evt1.raw_value[3]);
+
+		/* Process I2C1 Interrupts */
+		if (irq_evt1.new_contract_as_producer) {
+			tps_handle_new_contract_as_producer(data);
+		}
+
+		/* Clear handled interrupts */
+		k_mutex_lock(&data->lock, K_FOREVER);
+		tps_write_reg(&config->i2c, REG_INTERRUPT_CLEAR_FOR_I2C1,
+			      irq_evt1.raw_value, sizeof(union reg_interrupt));
+		k_mutex_unlock(&data->lock);
+	}
+}
+
+static void tps_irq_handler(const struct device *dev, struct gpio_callback *cb,
+			    uint32_t pins)
+{
+	struct tps6699x_data *data =
+		CONTAINER_OF(cb, struct tps6699x_data, irq_cb);
+	k_work_submit(&data->irq_work);
+}
+#endif
+
 static int cmd_pdc_sbud_handler(const struct shell *sh, size_t argc,
 				char **argv)
 {
@@ -535,6 +685,53 @@ static int cmd_pdc_info_handler(const struct shell *sh, size_t argc,
 	return 0;
 }
 
+static int cmd_pdc_discovery_handler(const struct shell *sh, size_t argc,
+				     char **argv)
+{
+	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	int rv;
+	union reg_rx_identity_sop rx_id;
+	struct tps_pd_identity id;
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "TPS6699x device not ready");
+		return -ENODEV;
+	}
+
+	shell_print(sh, "Starting PD Discovery...");
+
+	rv = tps_discover_identity(dev, &rx_id);
+	if (rv) {
+		shell_error(sh, "Discovery failed: %d", rv);
+		return rv;
+	}
+
+	/* 1. Print Raw Data */
+	shell_print(sh, "Raw Identity Data:");
+	shell_print(sh, "  Response Type: %d", rx_id.response_type);
+	shell_print(sh, "  Num VDOs: %d", rx_id.num_valid_vdos);
+
+	for (int i = 0; i < rx_id.num_valid_vdos && i < 6; i++) {
+		shell_print(sh, "  VDO%d: 0x%08x", i, rx_id.vdo[i]);
+	}
+
+	if (rx_id.response_type != 1) {
+		shell_print(sh, "  (No ACK response)");
+		return 0;
+	}
+
+	/* 2. Print Decoded Values */
+	tps_decode_identity(&rx_id, &id);
+
+	shell_print(sh, "Decoded Identity:");
+	shell_print(sh, "  USB Host: %d", id.usb_host);
+	shell_print(sh, "  USB Dev : %d", id.usb_device);
+	shell_print(sh, "  VID     : 0x%04x", id.vid);
+	shell_print(sh, "  PID     : 0x%04x", id.pid);
+
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_pdc_cmds,
 	SHELL_CMD_ARG(sbud, NULL, "Send SBUd command <0|1>",
@@ -543,14 +740,82 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      cmd_pdc_sbdf_handler, 2, 0),
 	SHELL_CMD_ARG(info, NULL, "Read and print chip info",
 		      cmd_pdc_info_handler, 1, 0),
+	SHELL_CMD_ARG(discovery, NULL,
+		      "Trigger PD Discovery and print Identity",
+		      cmd_pdc_discovery_handler, 1, 0),
 	SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(pdc, &sub_pdc_cmds, "PDC commands", NULL);
+
+#ifdef CONFIG_TPS6699X_INTERRUPT
+static int tps_init_interrupt(const struct device *dev)
+{
+	const struct tps6699x_config *cfg = dev->config;
+	struct tps6699x_data *data = dev->data;
+	int ret;
+
+	/* Initialize IRQ work */
+	k_work_init(&data->irq_work, tps_irq_work_handler);
+
+	/* Configure IRQ GPIO */
+	if (!gpio_is_ready_dt(&cfg->irq_gpio)) {
+		LOG_ERR("IRQ GPIO not ready");
+		return -ENODEV;
+	}
+
+	ret = gpio_pin_configure_dt(&cfg->irq_gpio, GPIO_INPUT);
+	if (ret < 0) {
+		LOG_ERR("Failed to configure IRQ GPIO: %d", ret);
+		return ret;
+	}
+
+	gpio_init_callback(&data->irq_cb, tps_irq_handler,
+			   BIT(cfg->irq_gpio.pin));
+	ret = gpio_add_callback(cfg->irq_gpio.port, &data->irq_cb);
+	if (ret < 0) {
+		LOG_ERR("Failed to add IRQ callback: %d", ret);
+		return ret;
+	}
+
+	ret = gpio_pin_interrupt_configure_dt(&cfg->irq_gpio,
+					      GPIO_INT_EDGE_TO_ACTIVE);
+	if (ret < 0) {
+		LOG_ERR("Failed to configure IRQ interrupt: %d", ret);
+		return ret;
+	}
+
+	/* Check if IRQ is already asserted */
+	if (gpio_pin_get_dt(&cfg->irq_gpio) > 0) {
+		LOG_INF("IRQ line already active, scheduling work");
+		k_work_submit(&data->irq_work);
+	}
+
+	/* Unmask "New Contract As Producer" interrupt only */
+	union reg_interrupt irq_mask = { 0 };
+
+	irq_mask.new_contract_as_producer = 1;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = tps_write_reg(&cfg->i2c, REG_INTERRUPT_MASK_FOR_I2C1,
+			    irq_mask.raw_value, sizeof(union reg_interrupt));
+	k_mutex_unlock(&data->lock);
+
+	if (ret == 0) {
+		LOG_INF("TPS6699X Interrupt Unmasked");
+	} else {
+		LOG_ERR("Failed to write IRQ mask: %d", ret);
+	}
+
+	return 0;
+}
+#endif
 
 static int tps6699x_init(const struct device *dev)
 {
 	const struct tps6699x_config *cfg = dev->config;
 	struct tps6699x_data *data = dev->data;
+
+	data->dev = dev;
 
 	if (!i2c_is_ready_dt(&cfg->i2c)) {
 		LOG_ERR("I2C bus not ready");
@@ -559,7 +824,15 @@ static int tps6699x_init(const struct device *dev)
 
 	k_mutex_init(&data->lock);
 
-#if IS_ENABLED(CONFIG_PDC_DEBUG)
+#ifdef CONFIG_TPS6699X_INTERRUPT
+	int ret;
+	ret = tps_init_interrupt(dev);
+	if (ret < 0) {
+		return ret;
+	}
+#endif
+
+#ifdef CONFIG_PDC_DEBUG
 	tps_uart_init();
 #endif
 

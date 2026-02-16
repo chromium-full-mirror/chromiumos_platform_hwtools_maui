@@ -6,6 +6,10 @@ config PDC_DEBUG
 	bool "Enable debug messages from PDC"
 	depends on UART_INTERRUPT_DRIVEN
 
+config TPS6699X_INTERRUPT
+	bool "Enable TPS6699X interrupt handling"
+	default n
+
 choice SBU_MUX_TYPE
 	bool "Type of mux for SBU lanes"
 

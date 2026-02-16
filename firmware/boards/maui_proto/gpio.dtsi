@@ -65,10 +65,6 @@
 			gpios = <&gpioa 25 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
 		};
 
-		i2c_pdc_irq: i2c_pdc_irq_l {
-			gpios = <&gpioa 28 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-		};
-
 		hub_ss_suspend: hub_ss_suspend {
 			gpios = <&gpioa 29 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
 		};
