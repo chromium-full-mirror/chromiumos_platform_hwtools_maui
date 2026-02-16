@@ -5,7 +5,12 @@
 
 #include "app_version.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/logging/log_ctrl.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/reboot.h>
 
@@ -90,7 +95,68 @@ static int cmd_reset_handler(const struct shell *shell, size_t argc,
 	return 0;
 }
 
+static int cmd_log_exclusive_handler(const struct shell *sh, size_t argc,
+				     char **argv)
+{
+	int sources = log_src_cnt_get(CONFIG_LOG_DOMAIN_ID);
+
+	if (strcmp(argv[1], "reset") == 0) {
+		for (int i = 0; i < sources; i++) {
+			log_filter_set(NULL, CONFIG_LOG_DOMAIN_ID, i,
+				       LOG_LEVEL_INF);
+		}
+		shell_print(sh, "Reset all modules to LOG_LEVEL_INF");
+		return 0;
+	}
+
+	if (strcmp(argv[1], "status") == 0) {
+		shell_print(sh, "Current log levels:");
+		for (int i = 0; i < sources; i++) {
+			const char *name =
+				log_source_name_get(CONFIG_LOG_DOMAIN_ID, i);
+			uint32_t level = log_filter_get(
+				NULL, CONFIG_LOG_DOMAIN_ID, i, true);
+			shell_print(sh, "  %-20s: %d", name, level);
+		}
+		return 0;
+	}
+
+	/* Exclusive mode: Enable specified modules, disable others */
+	for (int i = 0; i < sources; i++) {
+		const char *name = log_source_name_get(CONFIG_LOG_DOMAIN_ID, i);
+		bool enable = false;
+
+		/* Check if this module is in the argument list */
+		for (int j = 1; j < argc; j++) {
+			if (strcmp(name, argv[j]) == 0) {
+				enable = true;
+				break;
+			}
+		}
+
+		if (enable) {
+			log_filter_set(NULL, CONFIG_LOG_DOMAIN_ID, i,
+				       LOG_LEVEL_INF);
+		} else {
+			log_filter_set(NULL, CONFIG_LOG_DOMAIN_ID, i,
+				       LOG_LEVEL_NONE);
+		}
+	}
+
+	shell_print(sh, "Exclusive logging enabled for:");
+	for (int j = 1; j < argc; j++) {
+		shell_print(sh, "  - %s", argv[j]);
+	}
+
+	return 0;
+}
+
 SHELL_CMD_REGISTER(reset, NULL, "Reset the device", cmd_reset_handler);
 SHELL_CMD_REGISTER(version, NULL, "Prints firmware version",
 		   cmd_version_handler);
 SHELL_CMD_REGISTER(bsl, NULL, "Invokes BSL", cmd_jump_to_bsl_handler);
+SHELL_CMD_ARG_REGISTER(
+	log_exclusive, NULL,
+	"Log only specific modules, reset all, or show status.\n"
+	"Usage: log_exclusive <module1> [module2] ... | reset | status",
+	cmd_log_exclusive_handler, 2, 10);
