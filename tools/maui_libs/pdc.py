@@ -77,21 +77,38 @@ class MauiPdcClientAdapter:
 
     def fwup_stream(self, broadcast_address: int, data: bytes) -> int:
         """Transfer FW payload data to the EC via the console"""
-        broadcast_bytes = struct.pack("<H", broadcast_address)
-        buf = broadcast_bytes + data
-        b64_data = base64.b64encode(buf).decode("ascii")
+        # Split into smaller chunks to prevent shell buffer overflow
+        chunk_size = 32
+        last_written = 0
 
-        cmd = f"{CMD_STREAM} {b64_data}"
-        resp = self.device.send_command_raw(cmd)
-        self._check_response(resp)
+        # Handle empty data (send at least one command to get status)
+        # or split large data into chunks
+        chunks = (
+            [b""]
+            if len(data) == 0
+            else [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
+        )
 
-        # Parse "TPS_FWUP: Stream - bytes written: <N>"
-        match = re.search(r"TPS_FWUP: Stream - bytes written: (\d+)", resp)
-        if match:
-            return int(match.group(1))
+        for chunk in chunks:
+            broadcast_bytes = struct.pack("<H", broadcast_address)
+            buf = broadcast_bytes + chunk
+            b64_data = base64.b64encode(buf).decode("ascii")
 
-        logger.warning("Could not parse bytes written from response. Resp: %r", resp)
-        return len(data)
+            cmd = f"{CMD_STREAM} {b64_data}"
+            resp = self.device.send_command_raw(cmd)
+            self._check_response(resp)
+
+            # Parse "TPS_FWUP: Stream - bytes written: <N>"
+            match = re.search(r"TPS_FWUP: Stream - bytes written: (\d+)", resp)
+            if match:
+                last_written = int(match.group(1))
+            else:
+                logger.warning(
+                    "Could not parse bytes written from response. Resp: %r", resp
+                )
+                last_written += len(chunk)
+
+        return last_written
 
     def fwup_complete(self):
         """Finalize the update after all data is transferred"""

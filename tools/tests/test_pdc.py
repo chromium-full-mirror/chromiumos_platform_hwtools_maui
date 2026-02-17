@@ -8,7 +8,6 @@ Unit tests for the Maui PDC Firmware Update Module.
 
 import unittest
 from unittest.mock import MagicMock
-from unittest.mock import patch
 
 from maui_libs.pdc import CMD_COMPLETE
 from maui_libs.pdc import CMD_START
@@ -62,6 +61,40 @@ class TestMauiPdcClientAdapter(unittest.TestCase):
         self.mock_device.send_command_raw.return_value = "Error: Validation failed"
         with self.assertRaises(RuntimeError):
             self.adapter.fwup_complete()
+
+    def test_fwup_stream_chunking(self):
+        """Tests that large data is split into chunks."""
+        # Data length 64 bytes. Chunk size is 32. Should be 2 chunks.
+        data = b"A" * 64
+
+        # Mock responses.
+        # First call returns "bytes written: 32"
+        # Second call returns "bytes written: 64" (cumulative)
+        self.mock_device.send_command_raw.side_effect = [
+            "TPS_FWUP: Stream - bytes written: 32",
+            "TPS_FWUP: Stream - bytes written: 64",
+        ]
+
+        written = self.adapter.fwup_stream(0x10, data)
+
+        # Verify 2 calls
+        self.assertEqual(self.mock_device.send_command_raw.call_count, 2)
+
+        # Verify return value is the last one
+        self.assertEqual(written, 64)
+
+    def test_fwup_stream_empty(self):
+        """Tests that empty data sends at least one command (for status)."""
+        data = b""
+        self.mock_device.send_command_raw.return_value = (
+            "TPS_FWUP: Stream - bytes written: 100"
+        )
+
+        written = self.adapter.fwup_stream(0x10, data)
+
+        # Verify 1 call (even for empty data)
+        self.assertEqual(self.mock_device.send_command_raw.call_count, 1)
+        self.assertEqual(written, 100)
 
 
 if __name__ == "__main__":
