@@ -69,6 +69,8 @@ ignored-modules=
    paramiko,
    serial,
    maui_libs,
+   usb.core,
+   usb.util,
 
 # Python code to execute, usually for sys.path manipulation such as
 # pygtk.require().

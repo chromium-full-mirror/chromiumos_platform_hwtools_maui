@@ -13,15 +13,20 @@ MANAGER="${SCRIPT_DIR}/maui_image_manager.py"
 # Separate arguments for manager vs tool
 MANAGER_ARGS=()
 TOOL_ARGS=()
+VERSION_MODE=0
 
 while [[ $# -gt 0 ]]; do
     key="$1"
     case $key in
-        --channel)
-            MANAGER_ARGS+=("$1" "$2")
+        --version)
+            VERSION_MODE=1
+            shift
+            ;;
+        --utils_channel)
+            MANAGER_ARGS+=("--utils_channel" "$2")
             shift 2
             ;;
-        --channel=*)
+        --utils_channel=*)
             MANAGER_ARGS+=("$1")
             shift
             ;;
@@ -38,9 +43,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Get Image Tag
-IMAGE_TAG=$(python3 "$MANAGER" "${MANAGER_ARGS[@]}")
-if [ $? -ne 0 ]; then
+if ! IMAGE_TAG=$(python3 "$MANAGER" "${MANAGER_ARGS[@]}"); then
     exit 1
+fi
+
+if [ "$VERSION_MODE" -eq 1 ]; then
+    # Run version check inside the container
+    docker run --rm "$IMAGE_TAG" maui-ctl --internal-version
+    exit 0
 fi
 
 # Run maui-ctl inside the container

@@ -14,6 +14,7 @@ import argparse
 import logging
 import sys
 
+from maui_libs import cli
 from maui_libs.device import MauiDevice
 
 
@@ -23,14 +24,9 @@ logger = logging.getLogger(__name__)
 def main():
     """Main entry point for the maui-ctl CLI."""
     parser = argparse.ArgumentParser(description="Maui Control CLI Tool")
-    parser.add_argument(
-        "--serial",
-        help="Specify the serial number of the Maui device to connect to.",
-    )
+    cli.add_common_args(parser)
 
-    subparsers = parser.add_subparsers(
-        dest="command", required=True, help="Available commands"
-    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Status command
     subparsers.add_parser("status", help="Get current status of the Maui device")
@@ -56,6 +52,11 @@ def main():
     )
 
     args = parser.parse_args()
+    cli.handle_common_args(args)
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
 
     device = None
     try:
@@ -71,17 +72,18 @@ def main():
         elif args.command == "data":
             logger.info("Data command (%s) not yet supported by firmware.", args.state)
 
-    except RuntimeError as e:
-        logger.error("Command failed: %s", e)
-        sys.exit(1)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.critical("An unexpected error occurred: %s", e, exc_info=True)
-        sys.exit(1)
     finally:
         if device and device.is_connected:
             device.disconnect()
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    main()
+    cli.setup_logging()
+    try:
+        main()
+    except RuntimeError as e:
+        logger.error("Command failed: %s", e)
+        sys.exit(1)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.critical("An unexpected error occurred: %s", e, exc_info=True)
+        sys.exit(1)

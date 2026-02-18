@@ -164,7 +164,7 @@ def ensure_image(channel):
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--channel", default="stable")
+    parser.add_argument("--utils_channel", default="stable")
     parser.add_argument("--verbose", action="store_true")
     args, _ = parser.parse_known_args()  # Ignore other args
 
@@ -172,7 +172,7 @@ def main():
         logger.setLevel(logging.INFO)
 
     try:
-        image = ensure_image(args.channel)
+        image = ensure_image(args.utils_channel)
         print(image)
     except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"Error: {e}", file=sys.stderr)

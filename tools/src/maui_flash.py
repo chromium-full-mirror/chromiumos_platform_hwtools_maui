@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
+from maui_libs import cli
 from maui_libs.device import MauiDevice
 from maui_libs.pdc import MauiPdcClientAdapter
 from maui_libs.pdc import Tps6699xFirmwareUpdater
@@ -237,9 +238,9 @@ def handle_pdc_update(device, args):
     temp_file = None
     if args.file:
         fw_path = args.file
-    elif args.version:
+    elif args.fw_channel:
         try:
-            fw_path = fetch_firmware("pdc", args.version)
+            fw_path = fetch_firmware("pdc", args.fw_channel)
             temp_file = fw_path
         except RuntimeError as e:
             logger.error(e)
@@ -259,9 +260,9 @@ def handle_mcu_update(device, args):
     temp_file = None
     if args.file:
         fw_path = args.file
-    elif args.version:
+    elif args.fw_channel:
         try:
-            fw_path = fetch_firmware("mcu", args.version)
+            fw_path = fetch_firmware("mcu", args.fw_channel)
             temp_file = fw_path
         except RuntimeError as e:
             logger.error(e)
@@ -279,14 +280,9 @@ def handle_mcu_update(device, args):
 def main():
     """Main entry point for the maui-flash CLI."""
     parser = argparse.ArgumentParser(description="Maui Firmware Flashing CLI Tool")
-    parser.add_argument(
-        "--serial",
-        help="Specify the serial number of the Maui device to connect to.",
-    )
+    cli.add_common_args(parser)
 
-    subparsers = parser.add_subparsers(
-        dest="component", required=True, help="Component to flash"
-    )
+    subparsers = parser.add_subparsers(dest="component", help="Component to flash")
 
     # PDC subcommand
     pdc_parser = subparsers.add_parser(
@@ -298,7 +294,7 @@ def main():
         help="Path to the local PDC firmware binary file",
     )
     pdc_group.add_argument(
-        "--version",
+        "--fw_channel",
         help="Fetch and flash a specific version (e.g., 'stable', 'v1.2.3')",
     )
 
@@ -312,7 +308,7 @@ def main():
         help="Path to the local MCU firmware binary file (TI .txt format)",
     )
     mcu_group.add_argument(
-        "--version",
+        "--fw_channel",
         help="Fetch and flash a specific version (e.g., 'stable', '0.27-18b13be')",
     )
 
@@ -326,12 +322,17 @@ def main():
         "all", help="Update ALL components (MCU then PDC) from cloud"
     )
     all_parser.add_argument(
-        "--version",
+        "--fw_channel",
         default="stable",
         help="Fetch and flash a specific version/tag (default: 'stable')",
     )
 
     args = parser.parse_args()
+    cli.handle_common_args(args)
+
+    if not args.component:
+        parser.print_help()
+        sys.exit(1)
 
     # Main Execution Logic
     device = None
@@ -339,7 +340,7 @@ def main():
         device = MauiDevice.find_device(serial_number=args.serial)
 
         if args.component == "all":
-            handle_all_update(device, args.version)
+            handle_all_update(device, args.fw_channel)
 
         elif args.component == "pdc":
             handle_pdc_update(device, args)
@@ -350,17 +351,18 @@ def main():
         elif args.component == "h2h":
             logger.info("H2H firmware update not yet implemented.")
 
-    except RuntimeError as e:
-        logger.error("Command failed: %s", e)
-        sys.exit(1)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.critical("An unexpected error occurred: %s", e, exc_info=True)
-        sys.exit(1)
     finally:
         if device and device.is_connected:
             device.disconnect()
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    main()
+    cli.setup_logging()
+    try:
+        main()
+    except RuntimeError as e:
+        logger.error("Command failed: %s", e)
+        sys.exit(1)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.critical("An unexpected error occurred: %s", e, exc_info=True)
+        sys.exit(1)

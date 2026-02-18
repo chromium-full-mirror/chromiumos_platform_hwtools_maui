@@ -67,6 +67,16 @@ To build the `maui-utils` container locally (for development):
 docker build -t maui-utils -f dockerfiles/Dockerfile.utils .
 ```
 
+To release a new version to GCS (manages `stable.dockertag` automatically):
+```bash
+./tools/release.sh --tag stable
+```
+
+To check version:
+```bash
+./tools/scripts/maui-ctl --version
+```
+
 ## Flashing the Firmware
 
 Use the `maui-flash` tool.

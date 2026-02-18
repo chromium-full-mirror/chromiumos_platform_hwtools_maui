@@ -20,7 +20,7 @@ The software suite consists of:
 
 ### Build the Docker Image (Local Development)
 
-If you are developing or want to use a locally built image, you can build it yourself. The wrapper scripts support a `--channel local` flag to use this image instead of fetching one from Google Cloud Storage.
+If you are developing or want to use a locally built image, you can build it yourself. The wrapper scripts support a `--utils_channel local` flag to use this image instead of fetching one from Google Cloud Storage.
 
 ```bash
 # From the root of the repo
@@ -34,12 +34,18 @@ Wrapper scripts are provided in `tools/scripts/` to execute the tools inside the
 ### Docker Image Selection
 
 *   **Default**: Fetches the `stable` version from GCS.
-*   `--channel <name>`: Use a specific channel (e.g., `alpha`, `prev`) or explicit version (e.g., `v1.0.0`). The script checks if the image for this version is already available locally before downloading.
-*   `--channel local`: Use the locally built `maui-utils` image.
+*   `--utils_channel <name>`: Use a specific channel (e.g., `alpha`, `prev`) or explicit version (e.g., `v1.0.0`). The script checks if the image for this version is already available locally before downloading.
+*   `--utils_channel local`: Use the locally built `maui-utils` image.
 
 ### `maui-ctl` - Device Control
 
 Used for querying device status and controlling power/data lines.
+
+**Version:**
+```bash
+./tools/scripts/maui-ctl --version
+```
+Reports the version string of the tools *inside* the container.
 
 **Status:**
 ```bash
@@ -66,7 +72,7 @@ Updates both MCU and PDC firmware to the version specified (default: `stable`).
 
 ```bash
 ./tools/scripts/maui-flash --serial <SERIAL> all
-./tools/scripts/maui-flash --serial <SERIAL> all --version alpha
+./tools/scripts/maui-flash --serial <SERIAL> all --fw_channel alpha
 ```
 
 #### Power Delivery Controller (PDC)
@@ -78,7 +84,7 @@ Updates both MCU and PDC firmware to the version specified (default: `stable`).
 
 **Flash the 'stable' version (fetched from GCS):**
 ```bash
-./tools/scripts/maui-flash --serial <SERIAL> pdc --version stable
+./tools/scripts/maui-flash --serial <SERIAL> pdc --fw_channel stable
 ```
 
 #### Microcontroller (MCU)
@@ -90,7 +96,7 @@ Updates both MCU and PDC firmware to the version specified (default: `stable`).
 
 **Flash the 'stable' version:**
 ```bash
-./tools/scripts/maui-flash --serial <SERIAL> mcu --version stable
+./tools/scripts/maui-flash --serial <SERIAL> mcu --fw_channel stable
 ```
 
 ## Development
@@ -116,32 +122,28 @@ docker run --rm -v $(pwd):/repo -w /repo maui-utils \
 
 ### Release Process
 
-#### Docker Image
+#### Automated Release (Recommended)
 
-To release a new version of the host tools Docker image:
+A unified script is provided to handle the entire release flow, including building, tagging, and GCS upload.
 
-1.  **Build and Tag**:
-    ```bash
-    export VERSION="v1.0.0" # Set your version
-    docker build -t maui-utils -f dockerfiles/Dockerfile.utils .
-    docker tag maui-utils:latest maui-utils:${VERSION}
-    ```
+```bash
+# Release as a specific version (e.g. v0.0.1)
+./tools/release.sh --tag v0.0.1
 
-2.  **Package**:
-    ```bash
-    docker save -o maui-utils.tar maui-utils:${VERSION}
-    ```
+# Release as 'stable' (updates the stable channel marker in GCS)
+./tools/release.sh --tag stable
+```
 
-3.  **Upload to GCS**:
-    ```bash
-    gsutil cp maui-utils.tar gs://maui-firmware/docker/${VERSION}/maui-utils.tar
-    ```
+The script automatically:
+1.  Generates a dynamic version string based on `tools/VERSION` and git hash. This version is embedded in the Docker image and can be verified via `./maui-ctl --version`.
+2.  Builds the `maui-utils` Docker image.
+3.  Tags and saves the image.
+4.  Uploads the tarball to GCS.
+5.  If tagging as `stable`, it migrates the `stable.dockertag` marker in GCS to the current version.
 
-4.  **Tag as Stable (Optional)**:
-    ```bash
-    touch stable.dockertag
-    gsutil cp stable.dockertag gs://maui-firmware/docker/${VERSION}/stable.dockertag
-    ```
+#### Manual Release Steps (Reference)
+
+To release a new version of the host tools Docker image manually:
 
 ### GCS Bucket Structure
 
