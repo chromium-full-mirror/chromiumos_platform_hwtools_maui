@@ -124,28 +124,33 @@ docker run --rm -v $(pwd):/repo -w /repo maui-utils \
 
 #### Automated Release (Recommended)
 
-A unified script is provided to handle the entire release flow, including building, tagging, and GCS upload.
+Unified scripts are provided in `tools/scripts/release/` to handle the entire release flow, including building, tagging, and GCS upload.
 
+**Host Tools:**
 ```bash
-# Release as a specific version (e.g. v0.0.1)
-./tools/release.sh --tag v0.0.1
-
 # Release as 'stable' (updates the stable channel marker in GCS)
-./tools/release.sh --tag stable
+./tools/scripts/release/tools_release.sh --tag stable
 ```
 
-The script automatically:
-1.  Generates a dynamic version string based on `tools/VERSION` and git hash. This version is embedded in the Docker image and can be verified via `./maui-ctl --version`.
-2.  Builds the `maui-utils` Docker image.
-3.  Tags and saves the image.
-4.  Uploads the tarball to GCS.
-5.  If tagging as `stable`, it migrates the `stable.dockertag` marker in GCS to the current version.
+**MCU Firmware:**
+```bash
+# Build and release as 'stable'
+./tools/scripts/release/mcu_release.sh --tag stable
+```
 
-#### Manual Release Steps (Reference)
+**PDC Firmware:**
+```bash
+# Release a local binary to the 'stable' channel
+./tools/scripts/release/pdc_release.sh --file path/to/pdc_v1.2.bin --version v1.2 --tag stable
+```
 
-To release a new version of the host tools Docker image manually:
+The scripts automatically:
+1.  Generate dynamic version strings.
+2.  Build or package the relevant components.
+3.  Upload artifacts to GCS.
+4.  Manage channel tag migration (stable, alpha, etc.) by creating empty marker objects in GCS.
 
-### GCS Bucket Structure
+#### GCS Bucket Structure
 
 Firmware and Docker image fetching relies on a public GCS bucket `gs://maui-firmware`.
 

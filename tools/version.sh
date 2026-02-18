@@ -32,7 +32,7 @@ else
     GIT_DIRTY=""
 fi
 
-FULL_VERSION="${MAJOR}.${MINOR}.${PATCH}-${GIT_COMMIT_COUNT}-g${GIT_SHORT_HASH}${GIT_DIRTY}"
+FULL_VERSION="${MAJOR}.${MINOR}.${PATCH}-${GIT_COMMIT_COUNT}-${GIT_SHORT_HASH}${GIT_DIRTY}"
 
 # Write to python file
 cat << EOF > maui_libs/version.py

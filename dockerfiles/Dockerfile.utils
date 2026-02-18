@@ -50,9 +50,15 @@ RUN rm -rf /usr/src/dolos
 
 # Copy Maui Tools
 COPY tools /opt/maui/tools
+# Copy .git temporarily to allow version.sh to generate a proper version string
+COPY .git /opt/maui/.git
 
 # Configure Python Path for maui_libs
-ENV PYTHONPATH="/opt/maui/tools:${PYTHONPATH}"
+ENV PYTHONPATH="/opt/maui/tools"
+
+# Generate version info and cleanup .git
+WORKDIR /opt/maui/tools
+RUN ./version.sh && rm -rf /opt/maui/.git
 
 # Create wrappers for CLI tools using heredoc
 WORKDIR /opt/maui/tools
