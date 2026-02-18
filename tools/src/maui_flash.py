@@ -178,7 +178,7 @@ def do_update_pdc(device, fw_path):
     updater.update(fw_data)
 
 
-def do_update_mcu(fw_path):
+def do_update_mcu(fw_path, bsl_mode=False):
     """Performs the MCU firmware update."""
     if not fw_path:
         logger.error("No firmware file specified.")
@@ -190,6 +190,8 @@ def do_update_mcu(fw_path):
     try:
         # Invoke fw-updater
         cmd = ["fw-updater", fw_path]
+        if bsl_mode:
+            cmd.append("--bsl-mode")
         subprocess.check_call(cmd)
         logger.info("MCU firmware update successful.")
     except subprocess.CalledProcessError as e:
@@ -197,7 +199,7 @@ def do_update_mcu(fw_path):
         sys.exit(1)
 
 
-def handle_all_update(device, version):
+def handle_all_update(device, version, bsl_mode=False):
     """Handles updating all components."""
     # 1. Fetch Firmware
     mcu_fw = None
@@ -215,7 +217,7 @@ def handle_all_update(device, version):
         device.connect()  # Check connection
         device.disconnect()
 
-        do_update_mcu(mcu_fw)
+        do_update_mcu(mcu_fw, bsl_mode=bsl_mode)
 
         logger.info("Waiting for device to settle after MCU update...")
         time.sleep(1)
@@ -271,7 +273,7 @@ def handle_mcu_update(device, args):
     try:
         device.connect()
         device.disconnect()
-        do_update_mcu(fw_path)
+        do_update_mcu(fw_path, bsl_mode=args.bsl_mode)
     finally:
         if temp_file and os.path.exists(temp_file):
             os.remove(temp_file)
@@ -283,6 +285,14 @@ def main():
     cli.add_common_args(parser)
 
     subparsers = parser.add_subparsers(dest="component", help="Component to flash")
+
+    # MCU options shared between 'mcu' and 'all'
+    mcu_options = argparse.ArgumentParser(add_help=False)
+    mcu_options.add_argument(
+        "--bsl-mode",
+        action="store_true",
+        help="Pass --bsl-mode flag to fw-updater during the MCU update portion.",
+    )
 
     # PDC subcommand
     pdc_parser = subparsers.add_parser(
@@ -300,7 +310,9 @@ def main():
 
     # MCU subcommand
     mcu_parser = subparsers.add_parser(
-        "mcu", help="Update Microcontroller (MCU) firmware"
+        "mcu",
+        parents=[mcu_options],
+        help="Update Microcontroller (MCU) firmware",
     )
     mcu_group = mcu_parser.add_mutually_exclusive_group(required=True)
     mcu_group.add_argument(
@@ -319,7 +331,9 @@ def main():
 
     # All subcommand
     all_parser = subparsers.add_parser(
-        "all", help="Update ALL components (MCU then PDC) from cloud"
+        "all",
+        parents=[mcu_options],
+        help="Update ALL components (MCU then PDC) from cloud",
     )
     all_parser.add_argument(
         "--fw_channel",
@@ -340,7 +354,7 @@ def main():
         device = MauiDevice.find_device(serial_number=args.serial)
 
         if args.component == "all":
-            handle_all_update(device, args.fw_channel)
+            handle_all_update(device, args.fw_channel, bsl_mode=args.bsl_mode)
 
         elif args.component == "pdc":
             handle_pdc_update(device, args)
