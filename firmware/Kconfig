@@ -23,7 +23,7 @@ endchoice
 
 config SBU_MUX_INIT_DELAY
 	int "Delay between bootup and polling in milliseconds"
-	default 10
+	default 300
 
 config SBU_MUX_PERIOD
 	int "Period of reading the SBU lanes in milliseconds"
