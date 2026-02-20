@@ -6,7 +6,7 @@ config PDC_DEBUG
 	bool "Enable debug messages from PDC"
 	depends on UART_INTERRUPT_DRIVEN
 
-config TPS6699X_INTERRUPT
+config TPS6699X_INTERRUPTS
 	bool "Enable TPS6699X interrupt handling"
 	default n
 

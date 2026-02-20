@@ -148,7 +148,6 @@ static int tfus_run(const struct device *dev)
 		if (ret == 0) {
 			/* Got a mode result */
 			if (memcmp("F211", mode.data, sizeof(mode.data)) == 0) {
-				LOG_INF("TFUs complete, got F211");
 				return 0;
 			}
 

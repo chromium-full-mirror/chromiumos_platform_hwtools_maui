@@ -136,6 +136,36 @@ int tps_discover_identity(const struct device *dev,
 			  union reg_rx_identity_sop *rx_id);
 
 /**
+ * @brief Read Status
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param buf pointer where data is stored
+ *
+ * @return 0 on success, else -EIO
+ */
+int tps_rd_status(const struct device *dev, union reg_status *buf);
+
+/**
+ * @brief Read Port Configuration
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param buf pointer where data is stored
+ *
+ * @return 0 on success, else -EIO
+ */
+int tps_rd_port_config(const struct device *dev, union reg_port_config *buf);
+
+/**
+ * @brief Write Port Configuration
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param buf pointer where data is stored
+ *
+ * @return 0 on success, else -EIO
+ */
+int tps_wr_port_config(const struct device *dev, union reg_port_config *buf);
+
+/**
  * @brief Decode raw identity register into structured data
  *
  * @param rx_id Pointer to the raw identity register content

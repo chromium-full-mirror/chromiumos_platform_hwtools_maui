@@ -393,6 +393,56 @@ union reg_interrupt {
 };
 
 /**
+ * @brief 4.20 Status Register (Offset = 0x1a)
+ */
+union reg_status {
+	struct {
+		/* Byte 0 */
+		uint8_t plug_present : 1;
+		uint8_t connection_state : 3;
+		uint8_t plug_orientation : 1;
+		uint8_t port_role : 1;
+		uint8_t data_role : 1;
+		uint8_t epr_mode_is_active : 1;
+
+		/* Byte 1 */
+		uint8_t reserved0;
+
+		/* Byte 2 */
+		uint8_t reserved1 : 4;
+		uint8_t vbus_status : 2;
+		uint8_t usb_host_present : 2;
+
+		/* Byte 3 */
+		uint8_t acting_as_legacy : 2;
+		uint8_t reserved2 : 1;
+		uint8_t bist : 1;
+		uint8_t reserved3 : 2;
+		uint8_t soc_ack_timeout : 1;
+		uint8_t reserved4 : 1;
+
+		/* Byte 4 */
+		uint8_t am_status : 2;
+		uint8_t reserved5 : 6;
+	} __packed;
+	uint8_t raw_value[5];
+};
+
+/**
+ * @brief 4.26 Port Configuration Register (Offset = 0x28)
+ */
+union reg_port_config {
+	struct {
+		/* Bit 0 - 7 */
+		uint8_t reserved0 : 6;
+		uint8_t debug_accessory_ad_enable : 1;
+		uint8_t reserved1 : 1;
+		uint8_t reserved2[7];
+	} __packed;
+	uint8_t raw_value[8];
+};
+
+/**
  * @brief 4.49 Received SOP Identity Data Object Register (Offset = 48h)
  */
 union reg_rx_identity_sop {

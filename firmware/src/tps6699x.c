@@ -35,25 +35,36 @@
 
 LOG_MODULE_REGISTER(tps6699x, CONFIG_LOG_DEFAULT_LEVEL);
 
+/**
+ * @brief Debug Accessory Advertisement Mode
+ */
+enum tps_debug_accessory_mode {
+	DEBUG_ACCESSORY_AUTO = -1,
+	DEBUG_ACCESSORY_OFF = 0,
+	DEBUG_ACCESSORY_ON = 1,
+};
+
 struct tps6699x_config {
 	struct i2c_dt_spec i2c;
-#ifdef CONFIG_TPS6699X_INTERRUPT
+#ifdef CONFIG_TPS6699X_INTERRUPTS
 	struct gpio_dt_spec irq_gpio;
 #endif
 };
 
 struct tps6699x_data {
 	struct k_mutex lock;
-#ifdef CONFIG_TPS6699X_INTERRUPT
+#ifdef CONFIG_TPS6699X_INTERRUPTS
 	struct k_work irq_work;
+	struct k_work_delayable re_enable_work;
 	struct gpio_callback irq_cb;
 #endif
 	const struct device *dev;
+	int forced_debug_accessory_mode;
 };
 
 static const struct tps6699x_config tps6699x_config = {
 	.i2c = I2C_DT_SPEC_INST_GET(0),
-#ifdef CONFIG_TPS6699X_INTERRUPT
+#ifdef CONFIG_TPS6699X_INTERRUPTS
 	.irq_gpio = GPIO_DT_SPEC_INST_GET(0, irq_gpios),
 #endif
 };
@@ -462,6 +473,48 @@ int tps_discover_identity(const struct device *dev,
 	return rv;
 }
 
+int tps_rd_status(const struct device *dev, union reg_status *buf)
+{
+	const struct tps6699x_config *config = dev->config;
+	struct tps6699x_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = tps_xfer_reg(&config->i2c, REG_STATUS, buf->raw_value,
+			   sizeof(union reg_status), I2C_MSG_READ);
+	k_mutex_unlock(&data->lock);
+
+	return ret;
+}
+
+int tps_rd_port_config(const struct device *dev, union reg_port_config *buf)
+{
+	const struct tps6699x_config *config = dev->config;
+	struct tps6699x_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = tps_xfer_reg(&config->i2c, REG_PORT_CONFIGURATION, buf->raw_value,
+			   sizeof(union reg_port_config), I2C_MSG_READ);
+	k_mutex_unlock(&data->lock);
+
+	return ret;
+}
+
+int tps_wr_port_config(const struct device *dev, union reg_port_config *buf)
+{
+	const struct tps6699x_config *config = dev->config;
+	struct tps6699x_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = tps_xfer_reg(&config->i2c, REG_PORT_CONFIGURATION, buf->raw_value,
+			   sizeof(union reg_port_config), I2C_MSG_WRITE);
+	k_mutex_unlock(&data->lock);
+
+	return ret;
+}
+
 void tps_decode_identity(const union reg_rx_identity_sop *rx_id,
 			 struct tps_pd_identity *id)
 {
@@ -488,7 +541,7 @@ void tps_decode_identity(const union reg_rx_identity_sop *rx_id,
 	}
 }
 
-#ifdef CONFIG_TPS6699X_INTERRUPT
+#ifdef CONFIG_TPS6699X_INTERRUPTS
 static void tps_handle_new_contract_as_producer(struct tps6699x_data *data)
 {
 	const struct device *dev = data->dev;
@@ -520,6 +573,126 @@ static void tps_handle_new_contract_as_producer(struct tps6699x_data *data)
 	} else {
 		LOG_INF("Detected Unknown Device (Host=%d, Dev=%d)",
 			id.usb_host, id.usb_device);
+	}
+}
+
+static void tps_handle_device_incompatible(struct tps6699x_data *data)
+{
+	const struct device *dev = data->dev;
+	union reg_port_config port_cfg;
+	int rv;
+
+	if (data->forced_debug_accessory_mode != DEBUG_ACCESSORY_AUTO) {
+		return;
+	}
+
+	LOG_INF("Handling Device Incompatible Error");
+
+	/* Read Port Configuration (0x28) */
+	rv = tps_rd_port_config(dev, &port_cfg);
+	if (rv) {
+		LOG_ERR("Failed to read Port Config: %d", rv);
+		return;
+	}
+
+	if (port_cfg.debug_accessory_ad_enable == 0) {
+		return;
+	}
+
+	/* Disable Debug Accessory Advertisement by clearing bit 6 */
+	port_cfg.debug_accessory_ad_enable = 0;
+
+	/* Write back Port Configuration (0x28) */
+	rv = tps_wr_port_config(dev, &port_cfg);
+	if (rv) {
+		LOG_ERR("Failed to write Port Config: %d", rv);
+		return;
+	}
+
+	LOG_INF("Debug Accessory Advertisement disabled on Port A");
+}
+
+static void tps_re_enable_work_handler(struct k_work *work)
+{
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct tps6699x_data *data =
+		CONTAINER_OF(dwork, struct tps6699x_data, re_enable_work);
+	const struct device *dev = data->dev;
+	union reg_status status;
+	union reg_port_config port_cfg;
+	int rv;
+
+	/* Read Status (0x1A) to check plug presence */
+	rv = tps_rd_status(dev, &status);
+	if (rv) {
+		LOG_ERR("Failed to read Status: %d", rv);
+		return;
+	}
+
+	if (status.plug_present != 0) {
+		/* Device re-connected or never disconnected, nothing to do */
+		return;
+	}
+
+	/* Read Port Configuration (0x28) */
+	rv = tps_rd_port_config(dev, &port_cfg);
+	if (rv) {
+		LOG_ERR("Failed to read Port Config: %d", rv);
+		return;
+	}
+
+	if (port_cfg.debug_accessory_ad_enable == 1) {
+		/* Already enabled, nothing to do */
+		return;
+	}
+
+	/* Re-enable Debug Accessory Advertisement by setting bit 6 */
+	port_cfg.debug_accessory_ad_enable = 1;
+
+	/* Write back Port Configuration (0x28) */
+	rv = tps_wr_port_config(dev, &port_cfg);
+	if (rv) {
+		LOG_ERR("Failed to write Port Config: %d", rv);
+		return;
+	}
+
+	LOG_INF("Debug Accessory Advertisement re-enabled on Port A");
+}
+
+static void tps_handle_plug_insert_or_removal(struct tps6699x_data *data)
+{
+	const struct device *dev = data->dev;
+	union reg_status status;
+	int rv;
+
+	if (data->forced_debug_accessory_mode != DEBUG_ACCESSORY_AUTO) {
+		return;
+	}
+
+	/* Read Status (0x1A) to check plug presence */
+	rv = tps_rd_status(dev, &status);
+	if (rv) {
+		LOG_ERR("Failed to read Status: %d", rv);
+		return;
+	}
+
+	LOG_INF("Handling Plug Insert or Removal (plug_present=%d)",
+		status.plug_present);
+
+	/* If plug is not present (disconnection), reset debug accessory
+	 * advertisement to default (enabled) */
+	if (status.plug_present == 0) {
+		LOG_INF("Disconnection detected, scheduling Port A config reset");
+
+		/* Schedule re-enabling after a delay to avoid loops and
+		 * debounce. 500ms is chosen to be longer than a typical port
+		 * reset duration.
+		 */
+		k_work_reschedule(&data->re_enable_work, K_MSEC(500));
+	} else {
+		LOG_INF("Connection detected, canceling any pending Port A config reset");
+		/* Cancel any pending re-enable if a device is connected */
+		k_work_cancel_delayable(&data->re_enable_work);
 	}
 }
 
@@ -559,6 +732,12 @@ static void tps_irq_work_handler(struct k_work *work)
 		/* Process I2C1 Interrupts */
 		if (irq_evt1.new_contract_as_producer) {
 			tps_handle_new_contract_as_producer(data);
+		}
+		if (irq_evt1.device_incompatible_error) {
+			tps_handle_device_incompatible(data);
+		}
+		if (irq_evt1.plug_insert_or_removal) {
+			tps_handle_plug_insert_or_removal(data);
 		}
 
 		/* Clear handled interrupts */
@@ -732,6 +911,69 @@ static int cmd_pdc_discovery_handler(const struct shell *sh, size_t argc,
 	return 0;
 }
 
+static int cmd_pdc_debug_accessory_handler(const struct shell *sh, size_t argc,
+					   char **argv)
+{
+	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	struct tps6699x_data *data = dev->data;
+	union reg_port_config port_cfg;
+	int rv;
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "TPS6699x device not ready");
+		return -ENODEV;
+	}
+
+	if (strcmp(argv[1], "auto") == 0) {
+		data->forced_debug_accessory_mode = DEBUG_ACCESSORY_AUTO;
+		rv = tps_rd_port_config(dev, &port_cfg);
+		if (rv) {
+			shell_error(sh, "Read failed: %d", rv);
+			return rv;
+		}
+		port_cfg.debug_accessory_ad_enable = 1;
+		rv = tps_wr_port_config(dev, &port_cfg);
+		if (rv) {
+			shell_error(sh, "Write failed: %d", rv);
+			return rv;
+		}
+		shell_print(sh, "Debug Accessory set to auto mode");
+	} else if (strcmp(argv[1], "on") == 0) {
+		data->forced_debug_accessory_mode = DEBUG_ACCESSORY_ON;
+		rv = tps_rd_port_config(dev, &port_cfg);
+		if (rv) {
+			shell_error(sh, "Read failed: %d", rv);
+			return rv;
+		}
+		port_cfg.debug_accessory_ad_enable = 1;
+		rv = tps_wr_port_config(dev, &port_cfg);
+		if (rv) {
+			shell_error(sh, "Write failed: %d", rv);
+			return rv;
+		}
+		shell_print(sh, "Debug Accessory forced ON");
+	} else if (strcmp(argv[1], "off") == 0) {
+		data->forced_debug_accessory_mode = DEBUG_ACCESSORY_OFF;
+		rv = tps_rd_port_config(dev, &port_cfg);
+		if (rv) {
+			shell_error(sh, "Read failed: %d", rv);
+			return rv;
+		}
+		port_cfg.debug_accessory_ad_enable = 0;
+		rv = tps_wr_port_config(dev, &port_cfg);
+		if (rv) {
+			shell_error(sh, "Write failed: %d", rv);
+			return rv;
+		}
+		shell_print(sh, "Debug Accessory forced OFF");
+	} else {
+		shell_error(sh, "Invalid argument. Use auto|on|off");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_pdc_cmds,
 	SHELL_CMD_ARG(sbud, NULL, "Send SBUd command <0|1>",
@@ -743,19 +985,29 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_CMD_ARG(discovery, NULL,
 		      "Trigger PD Discovery and print Identity",
 		      cmd_pdc_discovery_handler, 1, 0),
+	SHELL_CMD_ARG(debug_accessory, NULL,
+		      "Toggle Debug Accessory mode <auto|on|off>",
+		      cmd_pdc_debug_accessory_handler, 2, 0),
 	SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(pdc, &sub_pdc_cmds, "PDC commands", NULL);
 
-#ifdef CONFIG_TPS6699X_INTERRUPT
+#ifdef CONFIG_TPS6699X_INTERRUPTS
 static int tps_init_interrupt(const struct device *dev)
 {
 	const struct tps6699x_config *cfg = dev->config;
 	struct tps6699x_data *data = dev->data;
 	int ret;
 
+	/* Robustness delay: give PDC time to start its bootloader */
+	k_msleep(500);
+
 	/* Initialize IRQ work */
 	k_work_init(&data->irq_work, tps_irq_work_handler);
+
+	/* Initialize re-enable work */
+	k_work_init_delayable(&data->re_enable_work,
+			      tps_re_enable_work_handler);
 
 	/* Configure IRQ GPIO */
 	if (!gpio_is_ready_dt(&cfg->irq_gpio)) {
@@ -790,10 +1042,13 @@ static int tps_init_interrupt(const struct device *dev)
 		k_work_submit(&data->irq_work);
 	}
 
-	/* Unmask "New Contract As Producer" interrupt only */
+	/* Unmask "New Contract As Producer", "Device Incompatible Error", and
+	 * "Plug Insert or Removal" interrupts */
 	union reg_interrupt irq_mask = { 0 };
 
 	irq_mask.new_contract_as_producer = 1;
+	irq_mask.device_incompatible_error = 1;
+	irq_mask.plug_insert_or_removal = 1;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
 	ret = tps_write_reg(&cfg->i2c, REG_INTERRUPT_MASK_FOR_I2C1,
@@ -816,6 +1071,12 @@ static int tps6699x_init(const struct device *dev)
 	struct tps6699x_data *data = dev->data;
 
 	data->dev = dev;
+	/*
+	 * -1 to set auto mode. It means enabled by default
+	 * and disabled only if incompatible device connected.
+	 * After incompatible device is disconnected mode is back to default.
+	 */
+	data->forced_debug_accessory_mode = DEBUG_ACCESSORY_AUTO;
 
 	if (!i2c_is_ready_dt(&cfg->i2c)) {
 		LOG_ERR("I2C bus not ready");
@@ -824,7 +1085,7 @@ static int tps6699x_init(const struct device *dev)
 
 	k_mutex_init(&data->lock);
 
-#ifdef CONFIG_TPS6699X_INTERRUPT
+#ifdef CONFIG_TPS6699X_INTERRUPTS
 	int ret;
 	ret = tps_init_interrupt(dev);
 	if (ret < 0) {

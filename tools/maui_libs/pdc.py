@@ -29,6 +29,8 @@ CMD_SEND_BLOCK = "pdc_tps_fwup send_block"
 CMD_STREAM = "pdc_tps_fwup stream"
 CMD_COMPLETE = "pdc_tps_fwup complete"
 CMD_ABORT = "pdc_tps_fwup abort"
+CMD_LOG_EXCLUSIVE = "log_exclusive tps6699x_fwup"
+CMD_LOG_RESET = "log_exclusive reset"
 
 
 class MauiPdcClientAdapter:
@@ -54,12 +56,11 @@ class MauiPdcClientAdapter:
 
     def fwup_start(self):
         """Start a FW update session"""
-        cmd = f"{CMD_START}"
-        # Increase timeout as start might take longer
-        resp = self.device.send_command_raw(cmd, timeout=5.0)
+        # Ensure Maui is not printing any other logs to terminal
+        resp = self.device.send_command_raw(CMD_LOG_EXCLUSIVE, timeout=5.0)
+        self._check_response(resp, "Exclusive logging enabled")
+        resp = self.device.send_command_raw(CMD_START, timeout=5.0)
         self._check_response(resp, "TPS_FWUP: Started")
-        # Give some time for additional logs (like TFUs complete) to flush
-        time.sleep(1)
 
     def fwup_initiate(self, data: bytes):
         """Send initiate command via TFU"""
@@ -116,10 +117,16 @@ class MauiPdcClientAdapter:
         # steps take a long time (~7s + 5s)
         resp = self.device.send_command_raw(CMD_COMPLETE, timeout=16.0)
         self._check_response(resp, "TPS_FWUP: Success")
+        # Reset Maui logging
+        resp = self.device.send_command_raw(CMD_LOG_RESET, timeout=5.0)
+        self._check_response(resp, "Reset all modules to default log levels")
 
     def fwup_abort(self):
         """Try to recover the PDC subsystem after a failed update procedure"""
         self.device.send_command_raw(CMD_ABORT)
+        # Reset Maui logging
+        resp = self.device.send_command_raw(CMD_LOG_RESET, timeout=5.0)
+        self._check_response(resp, "Reset all modules to default log levels")
 
 
 # Disable all the violations for keeping sync with sources
