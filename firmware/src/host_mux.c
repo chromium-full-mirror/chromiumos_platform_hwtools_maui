@@ -18,7 +18,8 @@ LOG_MODULE_REGISTER(host_mux);
 
 /* Internal Driver States */
 enum host_mux_state {
-	STATE_DISCONNECTED = 0,
+	STATE_INITIAL = 0,
+	STATE_DISCONNECTED,
 	STATE_CONNECTED_NORMAL,
 	STATE_CONNECTED_FLIP,
 };
@@ -61,19 +62,27 @@ static enum host_mux_state determine_state(int cc1_mv, int cc2_mv, int thresh)
 static void host_mux_apply_state(enum host_mux_state state)
 {
 	switch (state) {
+	case STATE_INITIAL:
+		gpio_set(GPIO_USB3_MUX_HOST_OE_R_L, 0); /* Disable Output */
+		gpio_set(GPIO_HUB_RESET_L, 0); /* Take Hub out of reset */
+		LOG_INF("Initial (Waiting for Host)");
+		break;
 	case STATE_CONNECTED_NORMAL:
 		gpio_set(GPIO_USB3_MUX_HOST_SEL_R, MUX_SEL_NORMAL);
 		gpio_set(GPIO_USB3_MUX_HOST_OE_R_L, 1); /* Enable Output */
+		gpio_set(GPIO_HUB_RESET_L, 0); /* Take Hub out of reset */
 		LOG_INF("Connected Normal (CC1)");
 		break;
 	case STATE_CONNECTED_FLIP:
 		gpio_set(GPIO_USB3_MUX_HOST_SEL_R, MUX_SEL_FLIP);
 		gpio_set(GPIO_USB3_MUX_HOST_OE_R_L, 1); /* Enable Output */
+		gpio_set(GPIO_HUB_RESET_L, 0); /* Take Hub out of reset */
 		LOG_INF("Connected Flip (CC2)");
 		break;
 	case STATE_DISCONNECTED:
 	default:
 		gpio_set(GPIO_USB3_MUX_HOST_OE_R_L, 0); /* Disable Output */
+		gpio_set(GPIO_HUB_RESET_L, 1); /* Keep Hub in reset */
 		LOG_INF("Disconnected");
 		break;
 	}
@@ -129,10 +138,10 @@ static int host_mux_init(void)
 {
 	struct host_mux_data *data = &host_mux;
 
-	data->current_state = STATE_DISCONNECTED;
-	data->candidate_state = STATE_DISCONNECTED;
-	/* Start with disconnected state applied */
-	host_mux_apply_state(STATE_DISCONNECTED);
+	data->current_state = STATE_INITIAL;
+	data->candidate_state = STATE_INITIAL;
+	/* Start with initial state applied */
+	host_mux_apply_state(STATE_INITIAL);
 
 	k_work_init(&data->drv_wq, host_mux_wq_cb);
 	k_timer_init(&data->drv_timer, host_mux_timer_cb, NULL);
