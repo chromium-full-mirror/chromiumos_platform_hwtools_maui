@@ -459,4 +459,13 @@ union reg_rx_identity_sop {
 	uint8_t raw_value[25];
 };
 
+#define GAID_MAGIC_VALUE 0xAC
+union gaid_params {
+	struct {
+		uint8_t switch_banks;
+		uint8_t copy_banks;
+	} __packed;
+	uint8_t raw[2];
+};
+
 #endif /* ZEPHYR_DRIVERS_USBC_TPS6699X_REG_H_ */

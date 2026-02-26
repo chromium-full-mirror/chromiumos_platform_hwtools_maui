@@ -6,7 +6,7 @@
 Maui Control CLI Tool.
 
 This script provides a command-line interface for controlling and querying
-Maui devices. It supports status retrieval and placeholder commands for
+Maui devices. It supports status retrieval and commands for
 power and data control.
 """
 
@@ -31,24 +31,22 @@ def main():
     # Status command
     subparsers.add_parser("status", help="Get current status of the Maui device")
 
-    # Placeholder for Power command
-    power_parser = subparsers.add_parser(
-        "power", help="(Placeholder) Control power to the DUT"
-    )
+    # Power command
+    power_parser = subparsers.add_parser("power", help="Control power to the DUT")
     power_parser.add_argument(
         "state",
         choices=["on", "off", "cycle"],
         help="Power state: on, off, or cycle",
     )
 
-    # Placeholder for Data command
+    # Data command
     data_parser = subparsers.add_parser(
-        "data", help="(Placeholder) Control USB data lines to the DUT"
+        "data", help="Control USB data lines to the DUT"
     )
     data_parser.add_argument(
         "state",
-        choices=["connect", "disconnect"],
-        help="Data line state: connect or disconnect",
+        choices=["on", "off", "cycle"],
+        help="Data state: on, off, or cycle",
     )
 
     args = parser.parse_args()
@@ -68,9 +66,13 @@ def main():
             response = device.send_command("version")
             logger.info("Device Version: %s", response.strip())
         elif args.command == "power":
-            logger.info("Power command (%s) not yet supported by firmware.", args.state)
+            logger.info("Setting power state to %s...", args.state)
+            response = device.set_power(args.state)
+            logger.info("Response: %s", response.strip())
         elif args.command == "data":
-            logger.info("Data command (%s) not yet supported by firmware.", args.state)
+            logger.info("Setting data state to %s...", args.state)
+            response = device.set_data(args.state)
+            logger.info("Response: %s", response.strip())
 
     finally:
         if device and device.is_connected:

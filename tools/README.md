@@ -56,10 +56,30 @@ Reports the version string of the tools *inside* the container.
 INFO: Device Version: Maui version 0.1.0-proto
 ```
 
-**Power / Data (Placeholder):**
-Current firmware does not yet support remote power/data switching. The commands exist but will report as unimplemented.
+**Power Control:**
+Controls the load switch to the DUT.
 ```bash
+# Turn DUT power ON
+./tools/scripts/maui-ctl --serial <SERIAL> power on
+
+# Turn DUT power OFF
 ./tools/scripts/maui-ctl --serial <SERIAL> power off
+
+# Cycle DUT power (Off then On)
+./tools/scripts/maui-ctl --serial <SERIAL> power cycle
+```
+
+**Data Control:**
+Controls the USB data muxes to the DUT.
+```bash
+# Enable USB data (Connect)
+./tools/scripts/maui-ctl --serial <SERIAL> data on
+
+# Disable USB data (Disconnect)
+./tools/scripts/maui-ctl --serial <SERIAL> data off
+
+# Cycle USB data (Disconnect then Connect)
+./tools/scripts/maui-ctl --serial <SERIAL> data cycle
 ```
 
 ### `maui-flash` - Firmware Updates

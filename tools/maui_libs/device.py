@@ -78,6 +78,25 @@ class MauiDevice:
         self.connect()
         return self._transport.send_command_raw(command, timeout=timeout)
 
+    def set_power(self, state: str) -> str:
+        """
+        Controls power to the DUT.
+        state: 'on', 'off', or 'cycle'
+        """
+        if state not in ["on", "off", "cycle"]:
+            raise ValueError("Invalid power state. Use 'on', 'off', or 'cycle'.")
+        return self.send_command(f"power_dut {state}")
+
+    def set_data(self, state: str) -> str:
+        """
+        Controls USB data lines to the DUT.
+        state: 'on', 'off', or 'cycle'
+        """
+        if state not in ["on", "off", "cycle"]:
+            raise ValueError("Invalid data state. Use 'on', 'off', or 'cycle'.")
+
+        return self.send_command(f"data_dut {state}")
+
     @classmethod
     def find_device(cls, serial_number: Optional[str] = None) -> "MauiDevice":
         """

@@ -133,6 +133,27 @@ enum tps_pd_data_role {
 int tps_cmd_data_role_swap(const struct device *dev, enum tps_pd_data_role role);
 
 /**
+ * @brief Run DISC command to simulate port disconnect
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param delay Delay in seconds before automatic reconnect. 0 for no automatic
+ * reconnect.
+ *
+ * @return 0 on success, else negative error code
+ */
+int tps_cmd_disc(const struct device *dev, uint8_t delay);
+
+/**
+ * @brief Run GAID command to perform cold reset
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param switch_banks If true, switch to the other firmware bank
+ *
+ * @return 0 on success, else negative error code
+ */
+int tps_cmd_gaid(const struct device *dev, bool switch_banks);
+
+/**
  * @brief Structure to hold decoded identity information
  */
 struct tps_pd_identity {

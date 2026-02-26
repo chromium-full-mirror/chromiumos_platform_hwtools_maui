@@ -62,15 +62,6 @@ struct tfu_complete {
 	uint8_t do_copy;
 } __attribute__((__packed__));
 
-#define GAID_MAGIC_VALUE 0xAC
-union gaid_params_t {
-	struct {
-		uint8_t switch_banks;
-		uint8_t copy_banks;
-	} __packed;
-	uint8_t raw[2];
-};
-
 struct tfu_query {
 	uint8_t bank;
 	uint8_t cmd;
@@ -90,24 +81,7 @@ struct tfu_query_output {
 
 static int do_reset_pdc(const struct device *dev)
 {
-	static union reg_data cmd_data;
-	union gaid_params_t params;
-	int rv;
-
-	/* Default behavior is to switch banks. */
-	params.switch_banks = GAID_MAGIC_VALUE;
-	params.copy_banks = 0;
-
-	memcpy(cmd_data.data, &params, sizeof(params));
-
-	rv = run_task_sync(dev, COMMAND_TASK_GAID, &cmd_data, sizeof(params), 1,
-			   NULL);
-
-	if (rv == 0) {
-		k_sleep(TPS_RESET_DELAY);
-	}
-
-	return rv;
+	return tps_cmd_gaid(dev, true);
 }
 
 static int tfus_run(const struct device *dev)

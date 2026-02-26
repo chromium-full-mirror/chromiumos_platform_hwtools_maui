@@ -26,6 +26,7 @@
 #endif
 
 #define TPS_4CC_POLL_DELAY K_USEC(200)
+#define TPS_RESET_DELAY K_MSEC(2000)
 
 /** Split streaming transfers down into chunks of this size for more manageable
  *  I2C write lengths.
@@ -458,6 +459,40 @@ int tps_cmd_data_role_swap(const struct device *dev, enum tps_pd_data_role role)
 					 COMMAND_TASK_SWUF;
 
 	return run_task_sync(dev, task, NULL, 0, 0, NULL);
+}
+
+int tps_cmd_disc(const struct device *dev, uint8_t delay)
+{
+	union reg_data cmd_data;
+	int ret;
+
+	memset(&cmd_data, 0, sizeof(cmd_data));
+	cmd_data.data[0] = delay;
+
+	ret = run_task_sync(dev, COMMAND_TASK_DISC, &cmd_data, 1, 0, NULL);
+
+	return ret;
+}
+
+int tps_cmd_gaid(const struct device *dev, bool switch_banks)
+{
+	union reg_data cmd_data;
+	union gaid_params params;
+	int ret;
+
+	params.switch_banks = switch_banks ? GAID_MAGIC_VALUE : 0;
+	params.copy_banks = 0;
+
+	memcpy(cmd_data.data, &params, sizeof(params));
+
+	ret = run_task_sync(dev, COMMAND_TASK_GAID, &cmd_data, sizeof(params),
+			    1, NULL);
+
+	if (ret == 0) {
+		k_sleep(TPS_RESET_DELAY);
+	}
+
+	return ret;
 }
 
 int tps_discover_identity(const struct device *dev,

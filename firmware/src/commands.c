@@ -4,6 +4,8 @@
  */
 
 #include "app_version.h"
+#include "gpio.h"
+#include "tps6699x.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -16,6 +18,113 @@
 #include <zephyr/sys/reboot.h>
 
 #include <ti/driverlib/m0p/dl_sysctl.h>
+
+/**
+ * Handles the power_dut command which controls the power to DUT using PDC.
+ */
+static int cmd_power_dut_handler(const struct shell *sh, size_t argc,
+				 char **argv)
+{
+	const struct device *pdc_dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	int rv;
+
+	if (!device_is_ready(pdc_dev)) {
+		shell_error(sh, "PDC device not ready");
+		return -ENODEV;
+	}
+
+	if (argc < 2) {
+		shell_error(sh, "Usage: power_dut <on|off|cycle>");
+		return -EINVAL;
+	}
+
+	if (strcmp(argv[1], "on") == 0) {
+		/* Use GAID to recover from a previous permanent disconnect
+		 * (DISC 0) or just to ensure port is enabled.
+		 */
+		rv = tps_cmd_gaid(pdc_dev, false);
+		if (rv) {
+			shell_error(sh, "Failed to enable DUT power: %d", rv);
+			return rv;
+		}
+		shell_print(sh, "DUT Power: ON (PDC Reset)");
+	} else if (strcmp(argv[1], "off") == 0) {
+		/* DISC 0: Permanent disconnect (Simulate Unplug) */
+		rv = tps_cmd_disc(pdc_dev, 0);
+		if (rv) {
+			shell_error(sh, "Failed to cut DUT power: %d", rv);
+			return rv;
+		}
+		shell_print(sh, "DUT Power: OFF (PDC Disconnect)");
+	} else if (strcmp(argv[1], "cycle") == 0) {
+		/* DISC 1: Disconnect for 1 second then reconnect */
+		shell_print(sh, "DUT Power: CYCLING...");
+		rv = tps_cmd_disc(pdc_dev, 1);
+		if (rv) {
+			shell_error(sh, "Failed to cycle DUT power: %d", rv);
+			return rv;
+		}
+		shell_print(sh, "DUT Power: Cycling started (1s delay)");
+	} else {
+		shell_error(sh, "Invalid argument: %s", argv[1]);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+/**
+ * Handles the data_dut command which controls the USB data muxes to DUT.
+ */
+static int cmd_data_dut_handler(const struct shell *sh, size_t argc,
+				char **argv)
+{
+	if (argc < 2) {
+		shell_error(sh, "Usage: data_dut <on|off|cycle>");
+		return -EINVAL;
+	}
+
+	if (strcmp(argv[1], "on") == 0) {
+		/* Bring H2H Bridge out of reset
+		 * and give it some time to settle up before DUT reconnection
+		 */
+		gpio_set(GPIO_H2H_RESET_L, 0);
+		k_sleep(K_MSEC(300));
+		/* Logic 1 = Active (Low physically for OE_L) */
+		gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 1);
+		gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 1);
+		shell_print(sh, "DUT Data: ON (CONNECTED)");
+	} else if (strcmp(argv[1], "off") == 0) {
+		/* Put H2H Bridge into reset.
+		 * For some reasons we see instabilities without this reset.
+		 */
+		gpio_set(GPIO_H2H_RESET_L, 1);
+		/* Logic 0 = Inactive (High physically for OE_L) */
+		gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 0);
+		gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 0);
+		shell_print(sh, "DUT Data: OFF (DISCONNECTED)");
+	} else if (strcmp(argv[1], "cycle") == 0) {
+		shell_print(sh, "DUT Data: Cycling started (1s delay)");
+		gpio_set(GPIO_H2H_RESET_L, 1);
+		gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 0);
+		gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 0);
+		k_sleep(K_MSEC(1000));
+
+		/* Bring H2H Bridge out of reset
+		 * and give it some time to settle up before DUT reconnection
+		 */
+		gpio_set(GPIO_H2H_RESET_L, 0);
+		k_sleep(K_MSEC(300));
+
+		gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 1);
+		gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 1);
+		shell_print(sh, "DUT Data: ON (CONNECTED)");
+	} else {
+		shell_error(sh, "Invalid argument: %s", argv[1]);
+		return -EINVAL;
+	}
+
+	return 0;
+}
 
 /**
  * Handles the command that jumps from main code to BSL.
@@ -175,3 +284,7 @@ SHELL_CMD_ARG_REGISTER(
 	"Log only specific modules, reset all, or show status.\n"
 	"Usage: log_exclusive <module1> [module2] ... | reset | status",
 	cmd_log_exclusive_handler, 2, 10);
+SHELL_CMD_REGISTER(power_dut, NULL, "Control DUT power <on|off|cycle>",
+		   cmd_power_dut_handler);
+SHELL_CMD_REGISTER(data_dut, NULL, "Control DUT data <on|off|cycle>",
+		   cmd_data_dut_handler);
