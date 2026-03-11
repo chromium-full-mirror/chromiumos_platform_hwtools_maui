@@ -98,24 +98,22 @@ static int cmd_reset_handler(const struct shell *shell, size_t argc,
 static int cmd_log_exclusive_handler(const struct shell *sh, size_t argc,
 				     char **argv)
 {
-	int sources = log_src_cnt_get(CONFIG_LOG_DOMAIN_ID);
+	int sources = log_src_cnt_get(0);
 
 	if (strcmp(argv[1], "reset") == 0) {
 		for (int i = 0; i < sources; i++) {
-			log_filter_set(NULL, CONFIG_LOG_DOMAIN_ID, i,
-				       LOG_LEVEL_INF);
+			uint32_t level = log_filter_get(NULL, 0, i, false);
+			log_filter_set(NULL, 0, i, level);
 		}
-		shell_print(sh, "Reset all modules to LOG_LEVEL_INF");
+		shell_print(sh, "Reset all modules to default log levels");
 		return 0;
 	}
 
 	if (strcmp(argv[1], "status") == 0) {
 		shell_print(sh, "Current log levels:");
 		for (int i = 0; i < sources; i++) {
-			const char *name =
-				log_source_name_get(CONFIG_LOG_DOMAIN_ID, i);
-			uint32_t level = log_filter_get(
-				NULL, CONFIG_LOG_DOMAIN_ID, i, true);
+			const char *name = log_source_name_get(0, i);
+			uint32_t level = log_filter_get(NULL, 0, i, true);
 			shell_print(sh, "  %-20s: %d", name, level);
 		}
 		return 0;
@@ -123,7 +121,7 @@ static int cmd_log_exclusive_handler(const struct shell *sh, size_t argc,
 
 	/* Exclusive mode: Enable specified modules, disable others */
 	for (int i = 0; i < sources; i++) {
-		const char *name = log_source_name_get(CONFIG_LOG_DOMAIN_ID, i);
+		const char *name = log_source_name_get(0, i);
 		bool enable = false;
 
 		/* Check if this module is in the argument list */
@@ -135,11 +133,10 @@ static int cmd_log_exclusive_handler(const struct shell *sh, size_t argc,
 		}
 
 		if (enable) {
-			log_filter_set(NULL, CONFIG_LOG_DOMAIN_ID, i,
-				       LOG_LEVEL_INF);
+			uint32_t level = log_filter_get(NULL, 0, i, false);
+			log_filter_set(NULL, 0, i, level);
 		} else {
-			log_filter_set(NULL, CONFIG_LOG_DOMAIN_ID, i,
-				       LOG_LEVEL_NONE);
+			log_filter_set(NULL, 0, i, LOG_LEVEL_NONE);
 		}
 	}
 

@@ -1,0 +1,40 @@
+commit 2b80e3e9743a917a58e1380266429533f5854eb3
+Author: Michał Barnaś <barnas@google.com>
+Date:   Mon Feb 23 17:42:44 2026 +0100
+
+    logging: fix getting runtime filter without backend
+    
+    Setting runtime filter with NULL backends, sends the backend_id as -1
+    to notify the calling function to update all available backends.
+    The same approach was used for getting runtime filter, causing the
+    value to be interpreted as 255 provided to offset calculation. This caused
+    the return to always be 0, instead of currently set value.
+    
+    Signed-off-by: Michał Barnaś <barnas@google.com>
+
+diff --git a/include/zephyr/logging/log_ctrl.h b/include/zephyr/logging/log_ctrl.h
+index ab1b7925ff2..8fb667a44db 100644
+--- a/include/zephyr/logging/log_ctrl.h
++++ b/include/zephyr/logging/log_ctrl.h
+@@ -162,6 +162,8 @@ int log_source_id_get(const char *name);
+ /**
+  * @brief Get source filter for the provided backend.
+  *
++ * If NULL is provided as backend, the first available one is checked.
++ *
+  * @param backend	Backend instance.
+  * @param domain_id	ID of the domain.
+  * @param source_id	Source (module or instance) ID.
+diff --git a/subsys/logging/log_mgmt.c b/subsys/logging/log_mgmt.c
+index 4335bdf637d..8abe58f9d53 100644
+--- a/subsys/logging/log_mgmt.c
++++ b/subsys/logging/log_mgmt.c
+@@ -586,7 +586,7 @@ void log_backend_disable(struct log_backend const *const backend)
+ uint32_t log_filter_get(struct log_backend const *const backend,
+ 			uint32_t domain_id, int16_t source_id, bool runtime)
+ {
+-	int id = (backend == NULL) ? -1 : log_backend_id_get(backend);
++	uint8_t id = (backend == NULL) ? 0 : log_backend_id_get(backend);
+ 
+ 	return filter_get(id, domain_id, source_id, runtime);
+ }

@@ -67,6 +67,10 @@ RUN west init -l && west update msp-hal_ti cmsis cmsis_6 &&\
   chmod +x /zephyr/zephyr/zephyr-env.sh &&\
   chmod o+w /zephyr/.west/config
 
+# TODO(b/492139328): remove when merged to Zephyr
+COPY patches/fix_log_filter_get.diff .
+RUN git apply fix_log_filter_get.diff
+
 WORKDIR /
 RUN git clone --depth=1 https://chromium.googlesource.com/chromiumos/platform/dolos
 
