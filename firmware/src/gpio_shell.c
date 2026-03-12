@@ -36,7 +36,7 @@ static int cmd_get(const struct shell *sh, size_t argc, char **argv)
 
 		rv = gpio_get(a);
 		if (rv < 0) {
-			LOG_ERR("Couldn't get value of GPIO");
+			shell_error(sh, "Couldn't get value of GPIO");
 			return rv;
 		}
 
@@ -58,7 +58,7 @@ static int cmd_set(const struct shell *sh, size_t argc, char **argv)
 	int val = shell_strtol(argv[2], 10, &rv);
 
 	if (rv) {
-		LOG_ERR("Invalid parameter: %s", argv[2]);
+		shell_error(sh, "Invalid parameter: %s", argv[2]);
 		return -EINVAL;
 	}
 
@@ -68,7 +68,7 @@ static int cmd_set(const struct shell *sh, size_t argc, char **argv)
 
 		rv = gpio_set(a, val);
 		if (rv < 0) {
-			LOG_ERR("Couldn't set value of GPIO");
+			shell_error(sh, "Couldn't set value of GPIO");
 			return val;
 		}
 
@@ -94,14 +94,14 @@ static int cmd_toggle(const struct shell *sh, size_t argc, char **argv)
 
 		rv = gpio_get(a);
 		if (rv < 0) {
-			LOG_ERR("Couldn't get value of GPIO");
+			shell_error(sh, "Couldn't get value of GPIO");
 			return rv;
 		}
 
 		val = !rv;
 		rv = gpio_set(a, val);
 		if (rv < 0) {
-			LOG_ERR("Couldn't set value of GPIO");
+			shell_error(sh, "Couldn't set value of GPIO");
 			return rv;
 		}
 

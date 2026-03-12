@@ -131,7 +131,7 @@ static void sbu_mux_wq_cb(struct k_work *wq)
 #endif
 			data->mux_en = 0;
 			k_msleep(10);
-			LOG_INF("disconnected.");
+			LOG_INF("disconnected");
 		} else {
 			/* SBU flip = polarity */
 #if IS_ENABLED(CONFIG_SBU_MUX_TYPE_PDC)
