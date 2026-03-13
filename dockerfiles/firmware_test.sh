@@ -24,7 +24,7 @@ cd /repo/firmware
 # $@ passes any arguments from the docker run command to west twister
 # Default to running all tests if no arguments are provided
 if [ $# -eq 0 ]; then
-    west twister -T tests -v -O tests/twister_outputs/twister-out
+    west twister -x=DTS_ROOT=/repo/firmware -T tests -v -O tests/twister_outputs/twister-out
 else
-    west twister "$@" -O tests/twister_outputs/twister-out
+    west twister -x=DTS_ROOT=/repo/firmware "$@" -O tests/twister_outputs/twister-out
 fi

@@ -1,0 +1,17 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+tests:
+  hwrev.zero:
+    platform_allow: native_sim
+    extra_configs:
+      - CONFIG_HWREV_VALUE=0
+  hwrev.seven:
+    platform_allow: native_sim
+    extra_configs:
+      - CONFIG_HWREV_VALUE=7
+  hwrev.two:
+    platform_allow: native_sim
+    extra_configs:
+      - CONFIG_HWREV_VALUE=2

@@ -1,0 +1,23 @@
+/* Copyright 2026 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	gpioemu: gpioemu {
+		compatible = "zephyr,gpio-emul";
+		status = "okay";
+		#gpio-cells = <0x2>;
+		gpio-controller;
+	};
+
+	hwrev {
+		compatible = "google,maui-hwrev";
+		status = "okay";
+		gpios = <&gpioemu 0 GPIO_ACTIVE_HIGH>,
+				<&gpioemu 1 GPIO_ACTIVE_HIGH>,
+				<&gpioemu 2 GPIO_ACTIVE_HIGH>;
+	};
+};

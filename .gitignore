@@ -22,6 +22,7 @@ cscope.po.out
 coverage.lcov
 /firmware/build
 /firmware/build_docker
+/firmware/twister-out*
 /firmware/tests/twister_outputs/*
 /firmware/src/app_version.h
 
