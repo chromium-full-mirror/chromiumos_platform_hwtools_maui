@@ -5,6 +5,7 @@
 
 #include "app_version.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -119,7 +120,24 @@ static int cmd_log_exclusive_handler(const struct shell *sh, size_t argc,
 		return 0;
 	}
 
-	/* Exclusive mode: Enable specified modules, disable others */
+	/* Exclusive mode: Validate all specified modules first */
+	for (int j = 1; j < argc; j++) {
+		bool found = false;
+
+		for (int i = 0; i < sources; i++) {
+			if (strcmp(log_source_name_get(0, i), argv[j]) == 0) {
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			shell_error(sh, "Module '%s' not found", argv[j]);
+			return -EINVAL;
+		}
+	}
+
+	/* All modules validated, apply exclusive logging */
 	for (int i = 0; i < sources; i++) {
 		const char *name = log_source_name_get(0, i);
 		bool enable = false;
