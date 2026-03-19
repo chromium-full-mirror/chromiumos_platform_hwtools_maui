@@ -108,11 +108,29 @@ int tps_cmd_sbud(const struct device *dev, uint8_t en);
  * @brief Run SBDF command to control SBU MUX polarity
  *
  * @param dev Pointer to the TPS6699x device instance
- * @param ufp_status 0 to not flip, 1 to flip
+ * @param flip 0 to not flip, 1 to flip
  *
  * @return 0 on success, else negative error code
  */
 int tps_cmd_sbdf(const struct device *dev, uint8_t flip);
+
+/**
+ * @brief PD Data Roles
+ */
+enum tps_pd_data_role {
+	TPS_PD_DATA_ROLE_UFP = 0,
+	TPS_PD_DATA_ROLE_DFP = 1,
+};
+
+/**
+ * @brief Run SWDF or SWUF command to perform a data role swap
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param role Data role to swap to (TPS_PD_DATA_ROLE_UFP or TPS_PD_DATA_ROLE_DFP)
+ *
+ * @return 0 on success, else negative error code
+ */
+int tps_cmd_data_role_swap(const struct device *dev, enum tps_pd_data_role role);
 
 /**
  * @brief Structure to hold decoded identity information

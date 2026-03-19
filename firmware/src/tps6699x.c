@@ -451,6 +451,15 @@ int tps_cmd_sbdf(const struct device *dev, uint8_t flip)
 	return ret;
 }
 
+int tps_cmd_data_role_swap(const struct device *dev, enum tps_pd_data_role role)
+{
+	enum command_task task = (role == TPS_PD_DATA_ROLE_DFP) ?
+					 COMMAND_TASK_SWDF :
+					 COMMAND_TASK_SWUF;
+
+	return run_task_sync(dev, task, NULL, 0, 0, NULL);
+}
+
 int tps_discover_identity(const struct device *dev,
 			  union reg_rx_identity_sop *rx_id)
 {
@@ -819,6 +828,78 @@ static int cmd_pdc_sbdf_handler(const struct shell *sh, size_t argc,
 	return 0;
 }
 
+static int cmd_pdc_dr_swap_handler(const struct shell *sh, size_t argc,
+				   char **argv)
+{
+	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	int rv;
+	enum tps_pd_data_role role;
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "TPS6699x device not ready");
+		return -ENODEV;
+	}
+
+	if (strcmp(argv[1], "dfp") == 0) {
+		role = TPS_PD_DATA_ROLE_DFP;
+	} else if (strcmp(argv[1], "ufp") == 0) {
+		role = TPS_PD_DATA_ROLE_UFP;
+	} else {
+		shell_error(sh, "Invalid argument. Use dfp|ufp");
+		return -EINVAL;
+	}
+
+	shell_print(sh, "Sending DR_Swap command to become %s", argv[1]);
+
+	rv = tps_cmd_data_role_swap(dev, role);
+	if (rv) {
+		shell_error(sh, "DR_Swap command failed: %d", rv);
+		return rv;
+	}
+
+	shell_print(sh, "DR_Swap command successful");
+	return 0;
+}
+
+static int cmd_pdc_status_handler(const struct shell *sh, size_t argc,
+				  char **argv)
+{
+	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	union reg_status status;
+	int rv;
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "TPS6699x device not ready");
+		return -ENODEV;
+	}
+
+	rv = tps_rd_status(dev, &status);
+	if (rv) {
+		shell_error(sh, "Failed to read Status: %d", rv);
+		return rv;
+	}
+
+	shell_print(sh, "PDC Status:");
+	shell_print(sh, "  Plug Present:     %s",
+		    status.plug_present ? "Yes" : "No");
+
+	if (status.plug_present) {
+		shell_print(sh, "  Connection State: %d",
+			    status.connection_state);
+		shell_print(sh, "  Orientation:      %s",
+			    status.plug_orientation ? "Flipped (CC2)" :
+						      "Normal (CC1)");
+		shell_print(sh, "  Power Role:       %s",
+			    status.port_role ? "Source" : "Sink");
+		shell_print(sh, "  Data Role:        %s",
+			    status.data_role ? "DFP (Host)" : "UFP (Device)");
+		shell_print(sh, "  EPR Mode Active:  %s",
+			    status.epr_mode_is_active ? "Yes" : "No");
+	}
+
+	return 0;
+}
+
 static int cmd_pdc_info_handler(const struct shell *sh, size_t argc,
 				char **argv)
 {
@@ -980,6 +1061,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      cmd_pdc_sbud_handler, 2, 0),
 	SHELL_CMD_ARG(sbdf, NULL, "Send SBDF command <0|1>",
 		      cmd_pdc_sbdf_handler, 2, 0),
+	SHELL_CMD_ARG(dr_swap, NULL, "Send DR_Swap command <dfp|ufp>",
+		      cmd_pdc_dr_swap_handler, 2, 0),
+	SHELL_CMD_ARG(status, NULL, "Read and print current status",
+		      cmd_pdc_status_handler, 1, 0),
 	SHELL_CMD_ARG(info, NULL, "Read and print chip info",
 		      cmd_pdc_info_handler, 1, 0),
 	SHELL_CMD_ARG(discovery, NULL,

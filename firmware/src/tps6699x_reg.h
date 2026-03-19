@@ -206,6 +206,10 @@ enum command_task {
 	COMMAND_TASK_SBUD = TASK_TO_UINT32('S', 'B', 'U', 'd'),
 	/* SBDF command */
 	COMMAND_TASK_SBDF = TASK_TO_UINT32('S', 'B', 'D', 'F'),
+	/* Data role swap to DFP */
+	COMMAND_TASK_SWDF = TASK_TO_UINT32('S', 'W', 'D', 'F'),
+	/* Data role swap to UFP */
+	COMMAND_TASK_SWUF = TASK_TO_UINT32('S', 'W', 'U', 'F'),
 	/* Send VDM */
 	COMMAND_TASK_VDMS = TASK_TO_UINT32('V', 'D', 'M', 's'),
 };
