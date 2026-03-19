@@ -551,12 +551,13 @@ void tps_decode_identity(const union reg_rx_identity_sop *rx_id,
 }
 
 #ifdef CONFIG_TPS6699X_INTERRUPTS
-static void tps_handle_new_contract_as_producer(struct tps6699x_data *data)
+static void tps_handle_new_contract(struct tps6699x_data *data)
 {
 	const struct device *dev = data->dev;
 	int rv;
 	union reg_rx_identity_sop rx_id;
 	struct tps_pd_identity id;
+	union reg_status status;
 
 	LOG_INF("Handling New Contract As Provider");
 
@@ -569,19 +570,41 @@ static void tps_handle_new_contract_as_producer(struct tps6699x_data *data)
 
 	tps_decode_identity(&rx_id, &id);
 
+	/* Read current status to check data role */
+	rv = tps_rd_status(dev, &status);
+	if (rv) {
+		LOG_ERR("Failed to read status: %d", rv);
+		return;
+	}
+
 	/*
-	 * If the device is identified as a Phone toggle the Mux GPIO.
-	 * It is not implemented on HW yet, so print and placeholder only.
+	 * For Pixel Phone, Maui should stay as DFP.
+	 * For Chromebook, Maui should swap to UFP if possible.
+	 * DFP/UFP roles need to be aligned with Mux direction.
 	 */
 	if (id.usb_host == 1 && id.usb_device == 1) {
 		LOG_INF("Detected Android Phone");
-		LOG_INF("Toggle Mux GPIO to Direct Device Mode");
+
+		if (status.data_role == TPS_PD_DATA_ROLE_UFP) {
+			LOG_INF("Swapping to DFP for Phone");
+			tps_cmd_data_role_swap(dev, TPS_PD_DATA_ROLE_DFP);
+		}
+
+		LOG_INF("Set Mux to Direct Device Mode (Placeholder)");
 	} else if (id.usb_host == 1 && id.usb_device == 0) {
 		LOG_INF("Detected Chromebook");
-		LOG_INF("Keep Mux in Host-to-Host Bridge Mode");
+
+		if (status.data_role == TPS_PD_DATA_ROLE_DFP) {
+			LOG_INF("Swapping to UFP for Chromebook");
+			tps_cmd_data_role_swap(dev, TPS_PD_DATA_ROLE_UFP);
+		}
+
+		LOG_INF("Set Mux to Host-to-Host Bridge Mode (Placeholder)");
 	} else {
 		LOG_INF("Detected Unknown Device (Host=%d, Dev=%d)",
 			id.usb_host, id.usb_device);
+
+		LOG_INF("Set Mux to Host-to-Host Bridge Mode (Placeholder)");
 	}
 }
 
@@ -642,6 +665,9 @@ static void tps_re_enable_work_handler(struct k_work *work)
 		/* Device re-connected or never disconnected, nothing to do */
 		return;
 	}
+
+	/* Reset Mux to default Bridge Mode */
+	LOG_INF("Mux reset to Bridge Mode (Placeholder)");
 
 	/* Read Port Configuration (0x28) */
 	rv = tps_rd_port_config(dev, &port_cfg);
@@ -739,8 +765,9 @@ static void tps_irq_work_handler(struct k_work *work)
 			irq_evt1.raw_value[2], irq_evt1.raw_value[3]);
 
 		/* Process I2C1 Interrupts */
-		if (irq_evt1.new_contract_as_producer) {
-			tps_handle_new_contract_as_producer(data);
+		if (irq_evt1.new_contract_as_producer ||
+		    irq_evt1.new_contract_as_consumer) {
+			tps_handle_new_contract(data);
 		}
 		if (irq_evt1.device_incompatible_error) {
 			tps_handle_device_incompatible(data);
@@ -1127,11 +1154,12 @@ static int tps_init_interrupt(const struct device *dev)
 		k_work_submit(&data->irq_work);
 	}
 
-	/* Unmask "New Contract As Producer", "Device Incompatible Error", and
-	 * "Plug Insert or Removal" interrupts */
+	/* Unmask "New Contract As Producer/Consumer", "Device Incompatible
+	 * Error", and "Plug Insert or Removal" interrupts */
 	union reg_interrupt irq_mask = { 0 };
 
 	irq_mask.new_contract_as_producer = 1;
+	irq_mask.new_contract_as_consumer = 1;
 	irq_mask.device_incompatible_error = 1;
 	irq_mask.plug_insert_or_removal = 1;
 
