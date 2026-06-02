@@ -24,21 +24,16 @@ int main(void)
 	ret = leds_init();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize LEDs (err %d)", ret);
+		led_set_state(LED_GREEN, LED_STATE_SYS_ERROR);
 		return 0;
 	}
 
 	ret = adcs_init();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize ADCs (err %d)", ret);
+		led_set_state(LED_GREEN, LED_STATE_SYS_ERROR);
 		return 0;
 	}
 
-	LOG_INF("Main loop~!");
-	while (1) {
-		led_toggle(LED_GREEN);
-		led_toggle(LED_AMBER);
-
-		k_msleep(SLEEP_TIME_MS);
-	}
 	return 0;
 }

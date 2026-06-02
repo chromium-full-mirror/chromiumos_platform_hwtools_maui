@@ -10,6 +10,15 @@
 
 enum led_color { LED_GREEN, LED_AMBER, LED_COUNT };
 
+enum led_state {
+	// Green
+	LED_STATE_SYS_GOOD = 0, LED_STATE_SYS_ERROR = 1,
+	// Amber
+	LED_STATE_PD_NO_POWER = 0, LED_STATE_PD_CONTRACT = 1,
+
+	LED_STATE_COUNT
+};
+
 /**
  * @brief Initialize the LED module.
  *
@@ -40,5 +49,14 @@ int led_disable(enum led_color color);
  * @return 0 on success, negative errno code on failure.
  */
 int led_toggle(enum led_color color);
+
+/**
+ * @brief Set led's state machine to blink in specified period
+ *
+ * @param color The LED color which state will be changed.
+ * @param state State to set.
+ * @return 0 on success, negative errno code on failure.
+ */
+int led_set_state(enum led_color color, enum led_state state);
 
 #endif /* LED_H_ */
