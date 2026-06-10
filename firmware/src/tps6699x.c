@@ -4,6 +4,7 @@
  */
 #include "tps6699x.h"
 #include "tps6699x_reg.h"
+#include "bypass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -625,7 +626,7 @@ static void tps_handle_new_contract(struct tps6699x_data *data)
 			tps_cmd_data_role_swap(dev, TPS_PD_DATA_ROLE_DFP);
 		}
 
-		LOG_INF("Set Mux to Direct Device Mode (Placeholder)");
+		bypass_set_mode(BYPASS_MODE_DIRECT);
 	} else if (id.usb_host == 1 && id.usb_device == 0) {
 		LOG_INF("Detected Chromebook");
 
@@ -634,12 +635,12 @@ static void tps_handle_new_contract(struct tps6699x_data *data)
 			tps_cmd_data_role_swap(dev, TPS_PD_DATA_ROLE_UFP);
 		}
 
-		LOG_INF("Set Mux to Host-to-Host Bridge Mode (Placeholder)");
+		bypass_set_mode(BYPASS_MODE_H2H);
 	} else {
 		LOG_INF("Detected Unknown Device (Host=%d, Dev=%d)",
 			id.usb_host, id.usb_device);
 
-		LOG_INF("Set Mux to Host-to-Host Bridge Mode (Placeholder)");
+		bypass_set_mode(BYPASS_MODE_H2H);
 	}
 }
 
@@ -702,7 +703,7 @@ static void tps_re_enable_work_handler(struct k_work *work)
 	}
 
 	/* Reset Mux to default Bridge Mode */
-	LOG_INF("Mux reset to Bridge Mode (Placeholder)");
+	bypass_set_mode(BYPASS_MODE_H2H);
 
 	/* Read Port Configuration (0x28) */
 	rv = tps_rd_port_config(dev, &port_cfg);

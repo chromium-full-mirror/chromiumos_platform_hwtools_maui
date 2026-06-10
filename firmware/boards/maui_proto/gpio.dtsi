@@ -15,6 +15,14 @@
 			gpios = <&gpioa 31 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
 		};
 
+		usb2_mux_hub_oe_l: usb2_mux_hub_oe_l {
+			gpios = <&gpiob 6 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb2_mux_hub_sel: usb2_mux_hub_sel {
+			gpios = <&gpiob 7 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
 		usb3_mux_dut_oe: usb3_mux_dut_oe_r_l {
 			gpios = <&gpiob 8 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
 		};
@@ -33,6 +41,14 @@
 
 		pp5000_cutoff: pp5000_cutoff {
 			gpios = <&gpiob 12 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		usb3_mux_hub_oe_l: usb3_mux_hub_oe_l {
+			gpios = <&gpiob 15 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb3_mux_hub_sel: usb3_mux_hub_sel {
+			gpios = <&gpiob 16 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
 		};
 
 		usb3_mux_host_oe: usb3_mux_host_oe_r_l {

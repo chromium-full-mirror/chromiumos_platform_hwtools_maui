@@ -13,6 +13,7 @@ project(maui)
 target_sources(app PRIVATE
 	drivers/adc_mspm0_adc12_wip.c
 	src/adc.c
+	src/bypass.c
 	src/commands.c
 	src/gpio.c
 	src/gpio_shell.c
