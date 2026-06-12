@@ -16,6 +16,12 @@ LOG_MODULE_REGISTER(host_mux);
 #define MUX_SEL_NORMAL 0
 #define MUX_SEL_FLIP 1
 
+/*
+ * VBUS threshold (4.0V minimum for valid USB VBUS)
+ * Use 2000 as there is voltage divider there.
+ */
+#define VBUS_MIN_THRESH_MV 2000
+
 /* Internal Driver States */
 enum host_mux_state {
 	STATE_INITIAL = 0,
@@ -35,19 +41,23 @@ struct host_mux_data {
 
 static struct host_mux_data host_mux;
 
-/*
- * Logic:
- * - Normal Orientation: CC1 > Thresh, CC2 < Thresh
- * - Flipped Orientation: CC2 > Thresh, CC1 < Thresh
- * - Disconnected: Both < Thresh
- * - Invalid/Other: Both > Thresh (should not happen in valid connection) ->
- * Treat as Disconnected or Maintain state? Treating as disconnected seems
- * safest to avoid shorting.
+/* Logic:
+ * - Block connection until VBUS is present to avoid D+ back-drive on host PC.
+ * - Normal Orientation: CC1 > Thresh, CC2 < Thresh, VBUS > 4V
+ * - Flipped Orientation: CC2 > Thresh, CC1 < Thresh, VBUS > 4V
+ * - Disconnected: Both CC < Thresh OR VBUS < 4V
  */
-static enum host_mux_state determine_state(int cc1_mv, int cc2_mv, int thresh)
+static enum host_mux_state determine_state(int cc1_mv, int cc2_mv, int vbus_mv,
+					   int cc_thresh)
 {
-	bool cc1_active = (cc1_mv > thresh);
-	bool cc2_active = (cc2_mv > thresh);
+	bool cc1_active = (cc1_mv > cc_thresh);
+	bool cc2_active = (cc2_mv > cc_thresh);
+	bool vbus_active = (vbus_mv > VBUS_MIN_THRESH_MV);
+
+	/* If the host hasn't supplied VBUS yet, treat as disconnected */
+	if (!vbus_active) {
+		return STATE_DISCONNECTED;
+	}
 
 	if (cc1_active && !cc2_active) {
 		return STATE_CONNECTED_NORMAL;
@@ -97,13 +107,15 @@ static void host_mux_wq_cb(struct k_work *wq)
 	int cc1 = adc_ch_read(ADC_CH_USB_HOST_CC1);
 	int cc2 = adc_ch_read(ADC_CH_USB_HOST_CC2);
 
+	int vbus = adc_ch_read(ADC_CH_PP5000_USB_HOST_VBUS);
+
 	if (cc1 < 0 || cc2 < 0) {
 		LOG_ERR("Error reading CC values: %d %d", cc1, cc2);
 		return;
 	}
 
 	enum host_mux_state new_sample_state =
-		determine_state(cc1, cc2, CONFIG_HOST_MUX_HIGH_THRESH);
+		determine_state(cc1, cc2, vbus, CONFIG_HOST_MUX_HIGH_THRESH);
 
 	if (new_sample_state == data->candidate_state) {
 		/* Sample matches candidate, continue debounce */
