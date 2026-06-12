@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Texas Instruments
+ * Copyright (c) 2026 Texas Instruments
  * copyright (c) 2026 Linumiz
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -30,9 +30,8 @@ LOG_MODULE_REGISTER(adc_mspm0_wip);
 #define ADC_MSPM0_CHANNEL_MAX            (ADC_SYS_NUM_ANALOG_CHAN)
 #define ADC_MSPM0_CHANNEL_NO_INIT        (0xFF)
 #define ADC_MSPM0_NUM_SAMPLE_TIMERS      2
-#define ADC_MSPM0_CHANNEL_CFG_STIME_MASK BIT(0)
-#define ADC_MSPM0_CHANNEL_CFG_REF_SHIFT  1
-#define ADC_MSPM0_REF_MASK_AFTER_SHIFT   (BIT(1) | BIT(0))
+#define ADC_MSPM0_MEM_CTL_STIME		 GENMASK(0, 0)
+#define ADC_MSPM0_MEM_CTL_REF		 GENMASK(2, 1)
 #define ADC_MSPM0_REF_VDD                0
 #define ADC_MSPM0_REF_INTERNAL           1
 #define ADC_MSPM0_REF_EXTERNAL           2
@@ -48,6 +47,17 @@ LOG_MODULE_REGISTER(adc_mspm0_wip);
 #define ADC_MSPM0_NS_PER_SEC             1000000000
 #define INT_VREF                         BIT(0)
 #define EXT_VREF                         BIT(1)
+
+enum mspm0_oversampling {
+	ADC_MSPM0_AVG_DISABLED,
+	ADC_MSPM0_AVG_2X,
+	ADC_MSPM0_AVG_4X,
+	ADC_MSPM0_AVG_8X,
+	ADC_MSPM0_AVG_16X,
+	ADC_MSPM0_AVG_32X,
+	ADC_MSPM0_AVG_64X,
+	ADC_MSPM0_AVG_128X
+};
 
 struct adc_mspm0_data {
 	struct adc_context ctx;
@@ -80,8 +90,6 @@ static void adc_mspm0_isr(const struct device *dev)
 	const struct adc_mspm0_cfg *config = dev->config;
 	uint8_t mem_ix;
 
-	DL_ADC12_disableConversions(config->base);
-
 	switch (DL_ADC12_getPendingInterrupt(config->base)) {
 	case DL_ADC12_IIDX_MEM0_RESULT_LOADED:
 	case DL_ADC12_IIDX_MEM1_RESULT_LOADED:
@@ -99,10 +107,12 @@ static void adc_mspm0_isr(const struct device *dev)
 			*data->buffer++ = DL_ADC12_getMemResult(config->base, mem_ix);
 		}
 		*data->buffer = DL_ADC12_getMemResult(config->base, mem_ix);
-		DL_ADC12_disableInterrupt(config->base, ((1 << (data->channel_eoc)) <<
-					  ADC12_CPU_INT_IMASK_MEMRESIFG0_OFS));
+		DL_ADC12_disableInterrupt((ADC12_Regs *)config->base,
+					  ((1 << (data->channel_eoc)) <<
+					   ADC12_CPU_INT_IMASK_MEMRESIFG0_OFS));
 		break;
 	default:
+		LOG_ERR("unexpected interrupt");
 		break;
 	}
 	adc_context_on_sampling_done(&data->ctx, dev);
@@ -159,20 +169,22 @@ static int adc_mspm0_validate_sampling_time(const struct adc_mspm0_cfg *config, 
 		}
 	} else {
 		period_ns = ADC_MSPM0_NS_PER_SEC / (clock_rate / config->divider);
-		/* Wakup time is 5us for both l and g mspm0 series */
+		/* Wakeup time is 5us for both l and g mspm0 series */
 		wakeup_cycles = ADC_MSPM0_WAKEUP_TIME_NS / period_ns;
 
 		if (acq_time == ADC_ACQ_TIME_DEFAULT) {
-			return wakeup_cycles;
+			return wakeup_cycles + 1;
 		}
 
-		acq_time = acq_time + wakeup_cycles;
-		if ((ADC_ACQ_TIME_UNIT(acq_time) == ADC_ACQ_TIME_TICKS) &&
-		    (ADC_ACQ_TIME_VALUE(acq_time) <= ADC12_SCOMP0_VAL_MASK)) {
-			return ADC_ACQ_TIME_VALUE(acq_time);
-		} else {
+		if (ADC_ACQ_TIME_UNIT(acq_time) != ADC_ACQ_TIME_TICKS) {
 			return -EINVAL;
 		}
+
+		acq_time = ADC_ACQ_TIME_VALUE(acq_time) + wakeup_cycles;
+		if (acq_time > ADC12_SCOMP0_VAL_MASK) {
+			return -EINVAL;
+		}
+		return acq_time;
 	}
 }
 
@@ -184,24 +196,15 @@ static int adc_mspm0_channel_setup(const struct device *dev,
 	const uint8_t ch = channel_cfg->channel_id;
 	int sampling_time;
 	int ret = 0;
-#ifdef CONFIG_REGULATOR_MSPM0_VREF
-	const struct adc_driver_api *api = dev->api;
-	uint32_t vref = ((uint32_t)api->ref_internal) * ADC_MSPM0_VREF_MULTIPLIER;
-#endif
 
-	if (ch > ADC_MSPM0_CHANNEL_MAX) {
+	if ((ch >= ADC_MSPM0_CHANNEL_MAX) ||
+	    (channel_cfg->differential) ||
+	    (channel_cfg->gain != ADC_GAIN_1)) {
 		return -EINVAL;
 	}
 
-	if (channel_cfg->differential) {
-		return -EINVAL;
-	}
-
-	if (channel_cfg->gain != ADC_GAIN_1) {
-		return -EINVAL;
-	}
-
-	sampling_time = adc_mspm0_validate_sampling_time(dev->config, channel_cfg->acquisition_time);
+	sampling_time = adc_mspm0_validate_sampling_time(dev->config,
+							 channel_cfg->acquisition_time);
 	if (sampling_time < 0) {
 		return sampling_time;
 	}
@@ -227,12 +230,12 @@ static int adc_mspm0_channel_setup(const struct device *dev,
 
 	switch (channel_cfg->reference) {
 	case ADC_REF_VDD_1:
-		data->channel_mem_ctl[ch] |= (ADC_MSPM0_REF_VDD << ADC_MSPM0_CHANNEL_CFG_REF_SHIFT);
+		data->channel_mem_ctl[ch] |= FIELD_PREP(ADC_MSPM0_MEM_CTL_REF, ADC_MSPM0_REF_VDD);
 		break;
 #ifdef CONFIG_REGULATOR_MSPM0_VREF
 	case ADC_REF_INTERNAL:
-		data->channel_mem_ctl[ch] |= (ADC_MSPM0_REF_INTERNAL <<
-					      ADC_MSPM0_CHANNEL_CFG_REF_SHIFT);
+		data->channel_mem_ctl[ch] |= FIELD_PREP(ADC_MSPM0_MEM_CTL_REF,
+							ADC_MSPM0_REF_INTERNAL);
 
 		if ((data->vref_flags & EXT_VREF) || !(config->vref_config)) {
 			ret = -EINVAL;
@@ -240,25 +243,29 @@ static int adc_mspm0_channel_setup(const struct device *dev,
 		}
 
 		if (!(data->vref_flags & INT_VREF)) {
-			if (regulator_set_voltage(config->vref_config, vref, vref) < 0) {
+			if (regulator_enable(config->vref_config) < 0) {
 				ret = -ENODEV;
 				goto unlock;
 			}
-			regulator_enable(config->vref_config);
 			data->vref_flags |= INT_VREF;
 		}
 		break;
 	case ADC_REF_EXTERNAL0:
-		data->channel_mem_ctl[ch] |= (ADC_MSPM0_REF_EXTERNAL <<
-					      ADC_MSPM0_CHANNEL_CFG_REF_SHIFT);
+		data->channel_mem_ctl[ch] |= FIELD_PREP(ADC_MSPM0_MEM_CTL_REF,
+							ADC_MSPM0_REF_EXTERNAL);
 
 		if ((data->vref_flags & INT_VREF) || !(config->vref_config)) {
 			ret = -EINVAL;
 			goto unlock;
 		}
 
+		if (regulator_is_enabled(config->vref_config)) {
+			LOG_ERR("Cannot use external vref: regulator is already in use");
+			ret = -EBUSY;
+			goto unlock;
+		}
+
 		if (!(data->vref_flags & EXT_VREF)) {
-			regulator_disable(config->vref_config);
 			data->vref_flags |= EXT_VREF;
 		}
 		break;
@@ -273,7 +280,7 @@ unlock:
 	return ret;
 }
 
-static int adc_mspm0_configSequence(const struct device *dev, const struct adc_sequence *seq)
+static int adc_mspm0_config_sequence(const struct device *dev, const struct adc_sequence *seq)
 {
 	struct adc_mspm0_data *data = dev->data;
 	const struct adc_mspm0_cfg *config = dev->config;
@@ -304,40 +311,40 @@ static int adc_mspm0_configSequence(const struct device *dev, const struct adc_s
 	}
 
 	switch (seq->oversampling) {
-	case 0:
+	case ADC_MSPM0_AVG_DISABLED:
 		avg_enabled = DL_ADC12_AVERAGING_MODE_DISABLED;
 		break;
-	case 1:
+	case ADC_MSPM0_AVG_2X:
 		avg_enabled = DL_ADC12_AVERAGING_MODE_ENABLED;
 		avg_acc = DL_ADC12_HW_AVG_NUM_ACC_2;
 		avg_div = DL_ADC12_HW_AVG_DEN_DIV_BY_2;
 		break;
-	case 2:
+	case ADC_MSPM0_AVG_4X:
 		avg_enabled = DL_ADC12_AVERAGING_MODE_ENABLED;
 		avg_acc = DL_ADC12_HW_AVG_NUM_ACC_4;
 		avg_div = DL_ADC12_HW_AVG_DEN_DIV_BY_4;
 		break;
-	case 3:
+	case ADC_MSPM0_AVG_8X:
 		avg_enabled = DL_ADC12_AVERAGING_MODE_ENABLED;
 		avg_acc = DL_ADC12_HW_AVG_NUM_ACC_8;
 		avg_div = DL_ADC12_HW_AVG_DEN_DIV_BY_8;
 		break;
-	case 4:
+	case ADC_MSPM0_AVG_16X:
 		avg_enabled = DL_ADC12_AVERAGING_MODE_ENABLED;
 		avg_acc = DL_ADC12_HW_AVG_NUM_ACC_16;
 		avg_div = DL_ADC12_HW_AVG_DEN_DIV_BY_16;
 		break;
-	case 5:
+	case ADC_MSPM0_AVG_32X:
 		avg_enabled = DL_ADC12_AVERAGING_MODE_ENABLED;
 		avg_acc = DL_ADC12_HW_AVG_NUM_ACC_32;
 		avg_div = DL_ADC12_HW_AVG_DEN_DIV_BY_32;
 		break;
-	case 6:
+	case ADC_MSPM0_AVG_64X:
 		avg_enabled = DL_ADC12_AVERAGING_MODE_ENABLED;
 		avg_acc = DL_ADC12_HW_AVG_NUM_ACC_64;
 		avg_div = DL_ADC12_HW_AVG_DEN_DIV_BY_64;
 		break;
-	case 7:
+	case ADC_MSPM0_AVG_128X:
 		avg_enabled = DL_ADC12_AVERAGING_MODE_ENABLED;
 		avg_acc = DL_ADC12_HW_AVG_NUM_ACC_128;
 		if (seq->resolution == 14) {
@@ -352,16 +359,12 @@ static int adc_mspm0_configSequence(const struct device *dev, const struct adc_s
 
 	while (channels) {
 		ch = find_lsb_set(channels) - 1;
-		if (ch >= ADC_MSPM0_CHANNEL_MAX) {
+		if ((ch >= ADC_MSPM0_CHANNEL_MAX) ||
+		    (data->channel_mem_ctl[ch] == ADC_MSPM0_CHANNEL_NO_INIT)) {
 			return -EINVAL;
 		}
 
-		if (data->channel_mem_ctl[ch] == ADC_MSPM0_CHANNEL_NO_INIT) {
-			return -EINVAL;
-		}
-
-		ref_index = (data->channel_mem_ctl[ch] >> ADC_MSPM0_CHANNEL_CFG_REF_SHIFT) &
-			     ADC_MSPM0_REF_MASK_AFTER_SHIFT;
+		ref_index = FIELD_GET(ADC_MSPM0_MEM_CTL_REF, data->channel_mem_ctl[ch]);
 
 		switch (ref_index) {
 		case ADC_MSPM0_REF_VDD:
@@ -380,7 +383,7 @@ static int adc_mspm0_configSequence(const struct device *dev, const struct adc_s
 			return -EINVAL;
 		}
 
-		stime = (data->channel_mem_ctl[ch] & ADC_MSPM0_CHANNEL_CFG_STIME_MASK)
+		stime = FIELD_GET(ADC_MSPM0_MEM_CTL_STIME, data->channel_mem_ctl[ch])
 			? DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP1
 			: DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0;
 
@@ -409,7 +412,7 @@ static int adc_mspm0_configSequence(const struct device *dev, const struct adc_s
 		return -EINVAL;
 	}
 
-	DL_ADC12_initSeqSample(config->base, DL_ADC12_REPEAT_MODE_ENABLED,
+	DL_ADC12_initSeqSample(config->base, DL_ADC12_REPEAT_MODE_DISABLED,
 			       DL_ADC12_SAMPLING_SOURCE_AUTO, DL_ADC12_TRIG_SRC_SOFTWARE,
 			       DL_ADC12_SEQ_START_ADDR_00,
 			       (data->channel_eoc) << ADC12_CTL2_ENDADD_OFS, resolution,
@@ -433,16 +436,13 @@ static int adc_mspm0_read_internal(const struct device *dev, const struct adc_se
 		return -EINVAL;
 	}
 
-	if (ch_count == 0 || ch_count > config->max_result) {
-		return -EINVAL;
-	}
-
 	if (sequence->resolution == ADC_MSPM0_RESOLUTION_14 &&
 	    sequence->oversampling != ADC_MSPM0_MAX_OVERSAMPLING) {
 		return -EINVAL;
 	}
 
-	if (sequence->oversampling > ADC_MSPM0_MAX_OVERSAMPLING) {
+	if ((ch_count == 0) || (ch_count > config->max_result) ||
+	    (sequence->oversampling > ADC_MSPM0_MAX_OVERSAMPLING)) {
 		return -EINVAL;
 	}
 
@@ -463,7 +463,7 @@ static int adc_mspm0_read_internal(const struct device *dev, const struct adc_se
 	data->buffer = sequence->buffer;
 	data->repeat_buffer = data->buffer;
 
-	sequence_ret = adc_mspm0_configSequence(dev, sequence);
+	sequence_ret = adc_mspm0_config_sequence(dev, sequence);
 	if (sequence_ret < 0) {
 		return sequence_ret;
 	}
@@ -535,6 +535,19 @@ static int adc_mspm0_init(const struct device *dev)
 	return 0;
 }
 
+#define MSPM0_ADC_VREF_MV(index)								   \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(index, vref),						   \
+		    (DT_PROP(DT_PHANDLE(DT_DRV_INST(index), vref), regulator_uv) / 1000), (0))	   \
+
+#define MSPM0_ADC_VREF(index) | MSPM0_ADC_VREF_MV(index)
+
+static DEVICE_API(adc, mspm0_driver_api) = {
+	.channel_setup = adc_mspm0_channel_setup,
+	.read = adc_mspm0_read,
+	.ref_internal = (0 DT_INST_FOREACH_STATUS_OKAY(MSPM0_ADC_VREF)),
+	IF_ENABLED(CONFIG_ADC_ASYNC, (.read_async = adc_mspm0_read_async,))
+};
+
 #define ADC_CLOCK_DIV(x)    DT_INST_PROP(x, ti_clk_divider)
 #define ADC_DT_CLOCK_DIV(x) _CONCAT(DL_ADC12_CLOCK_DIVIDE_, ADC_CLOCK_DIV(x))
 
@@ -544,7 +557,12 @@ static int adc_mspm0_init(const struct device *dev)
                                                                                                    \
 	PINCTRL_DT_INST_DEFINE(index);                                                             \
                                                                                                    \
-	static void adc_mspm0_cfg_func_##index(void);                                              \
+	static void adc_mspm0_cfg_func_##index(void)                                               \
+	{                                                                                          \
+		IRQ_CONNECT(DT_INST_IRQN(index), DT_INST_IRQ(index, priority), adc_mspm0_isr,      \
+			    DEVICE_DT_INST_GET(index), 0);                                         \
+		irq_enable(DT_INST_IRQN(index));                                                   \
+	}											   \
 	static const struct mspm0_sys_clock mspm0_adc_sys_clock##index =                           \
 						MSPM0_CLOCK_SUBSYS_FN(index);			   \
                                                                                                    \
@@ -563,11 +581,6 @@ static int adc_mspm0_init(const struct device *dev)
 		COND_CODE_1(DT_INST_NODE_HAS_PROP(index, vref),					   \
 		(.vref_config = DEVICE_DT_GET(DT_PHANDLE(DT_DRV_INST(index), vref)),),		   \
 		(.vref_config = NULL)) };							   \
-	static DEVICE_API(adc, mspm0_driver_api##index) = {                                        \
-		.channel_setup = adc_mspm0_channel_setup,                                          \
-		.read = adc_mspm0_read,                                                            \
-		.ref_internal = DT_INST_PROP(index, vref_mv),                                      \
-		IF_ENABLED(CONFIG_ADC_ASYNC, (.read_async = adc_mspm0_read_async,))};		   \
 	static struct adc_mspm0_data adc_mspm0_data_##index = {                                    \
 		ADC_CONTEXT_INIT_TIMER(adc_mspm0_data_##index, ctx),                               \
 		ADC_CONTEXT_INIT_LOCK(adc_mspm0_data_##index, ctx),                                \
@@ -575,12 +588,6 @@ static int adc_mspm0_init(const struct device *dev)
 	};                                                                                         \
 	DEVICE_DT_INST_DEFINE(index, &adc_mspm0_init, NULL, &adc_mspm0_data_##index,               \
 			      &adc_mspm0_cfg_##index, POST_KERNEL, CONFIG_ADC_INIT_PRIORITY,       \
-			      &mspm0_driver_api##index);                                           \
-                                                                                                   \
-	static void adc_mspm0_cfg_func_##index(void)                                               \
-	{                                                                                          \
-		IRQ_CONNECT(DT_INST_IRQN(index), DT_INST_IRQ(index, priority), adc_mspm0_isr,      \
-			    DEVICE_DT_INST_GET(index), 0);                                         \
-		irq_enable(DT_INST_IRQN(index));                                                   \
-	}
+			      &mspm0_driver_api);						   \
+
 DT_INST_FOREACH_STATUS_OKAY(MSPM0_ADC_INIT)
