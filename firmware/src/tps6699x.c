@@ -1235,10 +1235,24 @@ static int tps6699x_init(const struct device *dev)
 	k_mutex_init(&data->lock);
 
 #ifdef CONFIG_TPS6699X_INTERRUPTS
+	union reg_status status;
 	int ret;
+
 	ret = tps_init_interrupt(dev);
 	if (ret < 0) {
 		return ret;
+	}
+
+	/* Check for pre-existing contract */
+	ret = tps_rd_status(dev, &status);
+	if (ret) {
+		LOG_ERR("Failed to read Status: %d", ret);
+		return ret;
+	}
+
+	if (status.plug_present) {
+		LOG_INF("Detected previous contract");
+		tps_handle_new_contract(dev->data);
 	}
 #endif
 
@@ -1249,6 +1263,11 @@ static int tps6699x_init(const struct device *dev)
 	LOG_INF("TPS6699X initialized");
 	return 0;
 }
+
+#ifdef CONFIG_TPS6699X_INTERRUPTS
+BUILD_ASSERT(CONFIG_GPIO_INIT_PRIORITY < CONFIG_APPLICATION_INIT_PRIORITY,
+	"GPIO subsystem has to be initialized before this driver");
+#endif
 
 DEVICE_DT_INST_DEFINE(0, tps6699x_init, NULL, &tps6699x_data, &tps6699x_config,
 		      POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY, NULL);

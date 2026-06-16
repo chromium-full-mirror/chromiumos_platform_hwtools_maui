@@ -41,4 +41,8 @@ config HOST_MUX_HIGH_THRESH
 	int "Lower voltage threshold to treat signal as high (millivolts)"
 	default 200
 
+config GPIO_INIT_PRIORITY
+	int "GPIO subsystem init priority"
+	default 89
+
 source "Kconfig.zephyr"

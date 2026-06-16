@@ -119,4 +119,4 @@ static int gpios_init(const struct device *dev)
 }
 
 DEVICE_DT_INST_DEFINE(0, gpios_init, NULL, NULL, NULL, POST_KERNEL,
-		      CONFIG_APPLICATION_INIT_PRIORITY, NULL);
+		      CONFIG_GPIO_INIT_PRIORITY, NULL);
