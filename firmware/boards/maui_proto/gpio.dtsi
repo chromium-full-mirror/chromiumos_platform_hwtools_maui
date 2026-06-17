@@ -16,7 +16,7 @@
 		};
 
 		usb2_mux_hub_oe_l: usb2_mux_hub_oe_l {
-			gpios = <&gpiob 6 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpiob 6 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
 		};
 
 		usb2_mux_hub_sel: usb2_mux_hub_sel {
@@ -44,7 +44,7 @@
 		};
 
 		usb3_mux_hub_oe_l: usb3_mux_hub_oe_l {
-			gpios = <&gpiob 15 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+			gpios = <&gpiob 15 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
 		};
 
 		usb3_mux_hub_sel: usb3_mux_hub_sel {
