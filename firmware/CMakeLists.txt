@@ -45,5 +45,6 @@ target_sources(app PRIVATE
 	src/sbu_mux.c
 	src/tps6699x.c
 	src/tps6699x_fwup.c
+	src/usb_init.c
 	src/utils.c
 )
