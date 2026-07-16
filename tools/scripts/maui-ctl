@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --verbose)
             MANAGER_ARGS+=("$1") # Pass verbose to manager
-            # TOOL_ARGS+=("$1")   # Also pass verbose to the tool if it supports it
+            TOOL_ARGS+=("$1")   # Also pass verbose to the tool if it supports it
             shift
             ;;
         *)

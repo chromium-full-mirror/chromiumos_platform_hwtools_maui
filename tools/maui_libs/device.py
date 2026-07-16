@@ -30,7 +30,7 @@ class MauiDevice:
         device_type: str,
         vid: str,
         pid: str,
-    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    ):  # pylint: disable=too-many-positional-arguments,too-many-arguments
         self.port = port
         self.serial_number = serial_number
         self.device_type = device_type
@@ -70,8 +70,8 @@ class MauiDevice:
         return self._transport.send_command(command)
 
     def send_command_raw(self, command: str, timeout: float = None) -> str:
-        """
-        Sends a command to the Maui device and returns the raw response.
+        """Sends a command to the Maui device and returns the raw response.
+
         Useful for firmware update scripts that parse output themselves.
         An optional `timeout` can be provided for this specific command.
         """
@@ -79,8 +79,8 @@ class MauiDevice:
         return self._transport.send_command_raw(command, timeout=timeout)
 
     def set_power(self, state: str) -> str:
-        """
-        Controls power to the DUT.
+        """Controls power to the DUT.
+
         state: 'on', 'off', or 'cycle'
         """
         if state not in ["on", "off", "cycle"]:
@@ -88,8 +88,8 @@ class MauiDevice:
         return self.send_command(f"power_dut {state}")
 
     def set_data(self, state: str) -> str:
-        """
-        Controls USB data lines to the DUT.
+        """Controls USB data lines to the DUT.
+
         state: 'on', 'off', or 'cycle'
         """
         if state not in ["on", "off", "cycle"]:
@@ -98,13 +98,28 @@ class MauiDevice:
         return self.send_command(f"data_dut {state}")
 
     @classmethod
-    def find_device(cls, serial_number: Optional[str] = None) -> "MauiDevice":
-        """
-        Discovers and returns a MauiDevice instance.
+    def find_device(
+        cls, serial_number: Optional[str] = None, port: Optional[str] = None
+    ) -> "MauiDevice":
+        """Discovers and returns a MauiDevice instance.
+
+        If port is specified, it bypasses discovery and uses that port.
         If serial_number is None, it expects exactly one device.
         If multiple devices are found without a serial_number,
         it lists them and exits.
         """
+        if port:
+            logger.info(
+                "Bypassing discovery, using explicitly specified port: %s", port
+            )
+            return cls(
+                port=port,
+                serial_number=serial_number or "Explicit Port",
+                device_type="explicit",
+                vid="N/A",
+                pid="N/A",
+            )
+
         available_devices = list_maui_devices()
 
         if not available_devices:
@@ -171,7 +186,7 @@ class MauiDevice:
         if not dev_info.get("port"):
             raise NotImplementedError(
                 f"Found a native USB device "
-                f"(Serial: {dev_info.get("serial_number","No Serial Number")}) "
+                f"Serial: {dev_info.get('serial_number', 'No Serial Number')} "
                 "which does not currently support direct serial communication."
             )
         logger.info(

@@ -9,6 +9,8 @@ This script provides a command-line interface for updating firmware on Maui
 devices, supporting various components like the MCU and PDC.
 """
 
+# pylint: disable=duplicate-code
+
 import argparse
 import logging
 import os
@@ -25,6 +27,7 @@ from maui_libs import cli
 from maui_libs.device import MauiDevice
 from maui_libs.pdc import MauiPdcClientAdapter
 from maui_libs.pdc import Tps6699xFirmwareUpdater
+import serial
 
 
 logger = logging.getLogger(__name__)
@@ -178,7 +181,37 @@ def do_update_pdc(device, fw_path):
     updater.update(fw_data)
 
 
-def do_update_mcu(fw_path, bsl_mode=False):
+def wait_for_port(port_path: str, exists: bool = True, timeout: float = 10.0):
+    """Waits for a port path to exist or disappear."""
+    logger.info(
+        "Waiting for port %s to %s (timeout %.1fs)...",
+        port_path,
+        "appear" if exists else "disappear",
+        timeout,
+    )
+    start_time = time.time()
+    while True:
+        current_exists = os.path.exists(port_path)
+        if current_exists == exists:
+            if exists:
+                try:
+                    ser = serial.Serial(port_path)
+                    ser.close()
+                    break
+                except (serial.SerialException, PermissionError):
+                    pass
+            else:
+                break
+
+        if time.time() - start_time > timeout:
+            raise TimeoutError(
+                f"Timeout waiting for port {port_path} to "
+                f"{'appear' if exists else 'disappear'}"
+            )
+        time.sleep(0.5)
+
+
+def do_update_mcu(fw_path, bsl_mode=False, use_usb=False, port=None):
     """Performs the MCU firmware update."""
     if not fw_path:
         logger.error("No firmware file specified.")
@@ -190,8 +223,18 @@ def do_update_mcu(fw_path, bsl_mode=False):
     try:
         # Invoke fw-updater
         cmd = ["fw-updater", fw_path]
+        if use_usb:
+            cmd.append("--usb")
+        if port:
+            cmd.extend(["--uart", port])
+
         if bsl_mode:
             cmd.append("--bsl-mode")
+
+        if logger.isEnabledFor(logging.DEBUG):
+            cmd.append("-v")
+
+        logger.info("Running: %s", " ".join(cmd))
         subprocess.check_call(cmd)
         logger.info("MCU firmware update successful.")
     except subprocess.CalledProcessError as e:
@@ -199,7 +242,7 @@ def do_update_mcu(fw_path, bsl_mode=False):
         sys.exit(1)
 
 
-def handle_all_update(device, version, bsl_mode=False):
+def handle_all_update(device, version, bsl_mode=False, use_usb=False):
     """Handles updating all components."""
     # 1. Fetch Firmware
     mcu_fw = None
@@ -212,18 +255,24 @@ def handle_all_update(device, version, bsl_mode=False):
         sys.exit(1)
 
     try:
+        port_path = device.port
         # 2. Update MCU
-        # MCU update requires disconnected port for fw-updater
-        device.connect()  # Check connection
+        device.connect()
         device.disconnect()
 
-        do_update_mcu(mcu_fw, bsl_mode=bsl_mode)
+        do_update_mcu(mcu_fw, bsl_mode=bsl_mode, use_usb=use_usb, port=port_path)
 
-        logger.info("Waiting for device to settle after MCU update...")
-        time.sleep(1)
+        if use_usb and port_path:
+            try:
+                wait_for_port(port_path, exists=True, timeout=10.0)
+            except TimeoutError as e:
+                logger.error(e)
+                sys.exit(1)
+        else:
+            logger.info("Waiting for device to settle after MCU update...")
+            time.sleep(1)
 
         # 3. Update PDC
-        # PDC update requires connected MauiDevice
         device.connect()
         do_update_pdc(device, pdc_fw)
 
@@ -271,9 +320,16 @@ def handle_mcu_update(device, args):
             sys.exit(1)
 
     try:
+        port_path = device.port
         device.connect()
         device.disconnect()
-        do_update_mcu(fw_path, bsl_mode=args.bsl_mode)
+        do_update_mcu(fw_path, bsl_mode=args.bsl_mode, use_usb=args.usb, port=port_path)
+        if args.usb and port_path:
+            try:
+                wait_for_port(port_path, exists=True, timeout=10.0)
+            except TimeoutError as e:
+                logger.error(e)
+                sys.exit(1)
     finally:
         if temp_file and os.path.exists(temp_file):
             os.remove(temp_file)
@@ -351,10 +407,12 @@ def main():
     # Main Execution Logic
     device = None
     try:
-        device = MauiDevice.find_device(serial_number=args.serial)
+        device = MauiDevice.find_device(serial_number=args.serial, port=args.port)
 
         if args.component == "all":
-            handle_all_update(device, args.fw_channel, bsl_mode=args.bsl_mode)
+            handle_all_update(
+                device, args.fw_channel, bsl_mode=args.bsl_mode, use_usb=args.usb
+            )
 
         elif args.component == "pdc":
             handle_pdc_update(device, args)

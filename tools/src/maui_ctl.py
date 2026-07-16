@@ -58,7 +58,7 @@ def main():
 
     device = None
     try:
-        device = MauiDevice.find_device(serial_number=args.serial)
+        device = MauiDevice.find_device(serial_number=args.serial, port=args.port)
         device.connect()
 
         if args.command == "status":

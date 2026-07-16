@@ -91,7 +91,8 @@ To check version:
 Use the `maui-flash` tool.
 
 *   **Update All (Recommended)**: `./tools/scripts/maui-flash all` (Fetches stable from cloud. `--serial <SN>` is optional, required only if multiple devices are connected).
-*   **MCU (Local)**: `./tools/scripts/maui-flash mcu --file path/to/zephyr.txt` (`--serial <SN>` is optional).
+*   **MCU (Native USB DFU)**: `./tools/scripts/maui-flash --usb mcu --file path/to/maui_proto_5117.txt` (`--serial <SN>` is optional).
+*   **MCU (UART BSL)**: `./tools/scripts/maui-flash --port /dev/ttyUSB0 mcu --file path/to/maui_proto_3507.txt`
 *   **PDC (Local)**: `./tools/scripts/maui-flash pdc --file path/to/pdc.bin` (`--serial <SN>` is optional).
 
 ## Serial Console

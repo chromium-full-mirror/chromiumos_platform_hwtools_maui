@@ -27,6 +27,16 @@ If you are developing or want to use a locally built image, you can build it you
 docker build -t maui-utils -f dockerfiles/Dockerfile.utils .
 ```
 
+## Common CLI Arguments
+
+All Maui host tools support the following common arguments:
+
+*   `--serial <SERIAL>`: Specify the serial number of the Maui device to target (required when multiple devices are connected).
+*   `--port <PORT>`: Specify the explicit serial device port (e.g. `/dev/ttyACM0` or `/dev/ttyUSB0`) to bypass automatic discovery.
+*   `--usb`: Enable native USB DFU flashing mode for `maui_proto_5117` hardware.
+*   `--verbose`: Enable detailed debug logging for troubleshooting transport and flashing.
+*   `--internal-version`: Report the internal version string of `maui-libs` and exit.
+
 ## Usage
 
 Wrapper scripts are provided in `tools/scripts/` to execute the tools inside the Docker container seamlessly. These scripts automatically handle downloading the necessary Docker image from GCS if not using local mode.
@@ -111,30 +121,45 @@ Updates both MCU and PDC firmware to the version specified (default: `stable`).
 
 Depending on your board hardware:
 * **`maui_proto_5117`**: Supports native USB flashing via DFU (`--usb`).
-* **`maui_proto_3507`**: Uses UART BSL flashing.
+* **`maui_proto_3507`**: Uses UART BSL flashing (`--port`).
 
 **Flash from a local file:**
 ```bash
 # Native USB DFU (maui_proto_5117)
-./tools/scripts/maui-flash --usb mcu --file /path/to/zephyr.txt
+./tools/scripts/maui-flash --usb mcu --file /path/to/maui_proto_5117.txt
 
 # UART BSL (maui_proto_3507 / explicit port)
-./tools/scripts/maui-flash --port /dev/ttyUSB0 mcu --file /path/to/zephyr.txt
+./tools/scripts/maui-flash --port /dev/ttyUSB0 mcu --file /path/to/maui_proto_3507.txt
 ```
 
 **Flash the 'stable' version:**
 ```bash
+# Native USB (maui_proto_5117)
 ./tools/scripts/maui-flash --usb mcu --fw_channel stable
+
+# UART (maui_proto_3507)
+./tools/scripts/maui-flash mcu --fw_channel stable
 ```
+
+## Transport & Device Discovery Architecture
+
+The `maui_libs.transport` module manages low-level serial communication and handles hardware differences across board phases:
+
+*   **Supported Device Types**:
+    *   **Proto Board (`maui_proto_3507`)**: FTDI Dual USB-to-UART bridge (VID `0x0403`, PID `0x6002` / `0x6001`).
+    *   **Final Board (`maui_proto_5117`)**: Native USB CDC ACM (VID `0x18D1`, PID `0x5085`).
+*   **Shell Synchronization (`_synchronize_shell`)**: Ensures the serial interface is clean and ready at the prompt (`maui$`). Uses a bounded retry loop (5 retries) and non-blocking reads to avoid hangs on chatty asynchronous serial output.
+*   **Port Wait Helper (`wait_for_port`)**: Monitors CDC ACM port re-enumeration after firmware updates or reboots, ensuring tools wait for the MCU USB stack to come back online before sending subsequent commands.
 
 ## Development
 
 ### Project Structure
 
 *   `tools/maui_libs/`: Python package source.
-    *   `transport.py`: Low-level serial communication and device scanning.
+    *   `transport.py`: Low-level serial communication, prompt parsing, and device scanning.
     *   `device.py`: High-level `MauiDevice` abstraction.
     *   `pdc.py`: Logic for PDC firmware updates.
+    *   `cli.py`: Common CLI argument parsing and logging setup.
 *   `tools/src/`: CLI entry points (`maui_ctl.py`, `maui_flash.py`).
 *   `tools/tests/`: Unit tests.
 *   `tools/scripts/`: Host-side wrapper scripts (`maui-ctl`, `maui-flash`, `maui_image_manager.py`).

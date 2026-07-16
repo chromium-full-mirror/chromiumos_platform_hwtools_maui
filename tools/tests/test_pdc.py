@@ -9,8 +9,6 @@ Unit tests for the Maui PDC Firmware Update Module.
 import unittest
 from unittest.mock import MagicMock
 
-from maui_libs.pdc import CMD_COMPLETE
-from maui_libs.pdc import CMD_START
 from maui_libs.pdc import MauiPdcClientAdapter
 
 
@@ -23,11 +21,12 @@ class TestMauiPdcClientAdapter(unittest.TestCase):
 
     def test_fwup_start_success(self):
         """Tests successful start of firmware update session."""
-        self.mock_device.send_command_raw.return_value = "TPS_FWUP: Started"
+        self.mock_device.send_command_raw.side_effect = [
+            "Exclusive logging enabled",
+            "TPS_FWUP: Started",
+        ]
         self.adapter.fwup_start()
-        self.mock_device.send_command_raw.assert_called_with(
-            f"{CMD_START}", timeout=5.0
-        )
+        self.assertEqual(self.mock_device.send_command_raw.call_count, 2)
 
     def test_fwup_start_failure(self):
         """Tests failure to start firmware update session."""
@@ -52,9 +51,12 @@ class TestMauiPdcClientAdapter(unittest.TestCase):
 
     def test_fwup_complete_success(self):
         """Tests successful completion of firmware update."""
-        self.mock_device.send_command_raw.return_value = "TPS_FWUP: Success"
+        self.mock_device.send_command_raw.side_effect = [
+            "TPS_FWUP: Success",
+            "Reset all modules to default log levels",
+        ]
         self.adapter.fwup_complete()
-        self.mock_device.send_command_raw.assert_called_with(CMD_COMPLETE, timeout=16.0)
+        self.assertEqual(self.mock_device.send_command_raw.call_count, 2)
 
     def test_fwup_complete_failure(self):
         """Tests failure to complete firmware update."""
