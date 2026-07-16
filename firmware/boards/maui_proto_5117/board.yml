@@ -1,0 +1,9 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+board:
+  name: maui_proto_5117
+  full_name: Google MAUI Proto (MSPM0G5117)
+  socs:
+    - name: mspm0g5117

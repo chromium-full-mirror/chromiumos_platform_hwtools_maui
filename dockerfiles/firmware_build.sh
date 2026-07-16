@@ -22,5 +22,9 @@ source /zephyr/zephyr/zephyr-env.sh
 cd /repo/firmware
 chmod +x ./version.sh
 ./version.sh
-west build -b maui_proto -d build_docker "$@"
+if [ "$#" -eq 0 ]; then
+	west build -b maui_proto_3507 -d build_docker
+else
+	west build -d build_docker "$@"
+fi
 python3 /usr/local/bin/converter.py /repo/firmware/build_docker/zephyr/zephyr.bin /repo/firmware/build_docker/zephyr/zephyr.txt

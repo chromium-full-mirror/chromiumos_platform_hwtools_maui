@@ -2,9 +2,9 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+#include "bypass.h"
 #include "tps6699x.h"
 #include "tps6699x_reg.h"
-#include "bypass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,7 +75,7 @@ static struct tps6699x_data tps6699x_data;
 
 #ifdef CONFIG_PDC_DEBUG
 
-const struct device *tps_uart = DEVICE_DT_GET(DT_NODELABEL(uart1));
+const struct device *tps_uart = DEVICE_DT_GET(DT_ALIAS(pdc_debug_uart));
 
 void TPS_Uart_CB(const struct device *dev, void *user_data)
 {
@@ -1266,7 +1266,7 @@ static int tps6699x_init(const struct device *dev)
 
 #ifdef CONFIG_TPS6699X_INTERRUPTS
 BUILD_ASSERT(CONFIG_GPIO_INIT_PRIORITY < CONFIG_APPLICATION_INIT_PRIORITY,
-	"GPIO subsystem has to be initialized before this driver");
+	     "GPIO subsystem has to be initialized before this driver");
 #endif
 
 DEVICE_DT_INST_DEFINE(0, tps6699x_init, NULL, &tps6699x_data, &tps6699x_config,

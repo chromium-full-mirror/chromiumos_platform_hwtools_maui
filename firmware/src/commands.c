@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/logging/log_ctrl.h>
@@ -19,6 +20,7 @@
 
 #include <ti/driverlib/m0p/dl_sysctl.h>
 
+#if DT_HAS_COMPAT_STATUS_OKAY(ti_tps6699x)
 /**
  * Handles the power_dut command which controls the power to DUT using PDC.
  */
@@ -72,6 +74,7 @@ static int cmd_power_dut_handler(const struct shell *sh, size_t argc,
 
 	return 0;
 }
+#endif
 /**
  * Handles the data_dut command which controls the USB data muxes to DUT.
  */
@@ -138,7 +141,7 @@ static int cmd_jump_to_bsl_handler(const struct shell *sh, size_t argc,
 	shell_print(sh, "Going into BSL mode");
 
 	/* Erase SRAM completely before jumping to BSL */
-	__asm(
+	__asm__ volatile(
 #if defined(__GNUC__)
 		".syntax unified\n" /* Load SRAMFLASH register*/
 #endif
@@ -165,7 +168,8 @@ static int cmd_jump_to_bsl_handler(const struct shell *sh, size_t argc,
 		"blo     init_data_loop\n"
 		/* Force a reset calling BSL after clearing SRAM */
 		"str     %[resetLvlVal], [%[resetLvlAddr], #0x00]\n"
-		"str     %[resetCmdVal], [%[resetCmdAddr], #0x00]"
+		"str     %[resetCmdVal], [%[resetCmdAddr], #0x00]\n"
+		"b       .\n"
 		: /* No outputs */
 		: [resetLvlAddr] "r"(&SYSCTL->SOCLOCK.RESETLEVEL),
 		  [resetLvlVal] "r"(DL_SYSCTL_RESET_BOOTLOADER_ENTRY),
@@ -284,7 +288,9 @@ SHELL_CMD_ARG_REGISTER(
 	"Log only specific modules, reset all, or show status.\n"
 	"Usage: log_exclusive <module1> [module2] ... | reset | status",
 	cmd_log_exclusive_handler, 2, 10);
+#if DT_HAS_COMPAT_STATUS_OKAY(ti_tps6699x)
 SHELL_CMD_REGISTER(power_dut, NULL, "Control DUT power <on|off|cycle>",
 		   cmd_power_dut_handler);
+#endif
 SHELL_CMD_REGISTER(data_dut, NULL, "Control DUT data <on|off|cycle>",
 		   cmd_data_dut_handler);

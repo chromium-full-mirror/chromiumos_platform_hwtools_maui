@@ -3,12 +3,14 @@
  * found in the LICENSE file.
  */
 
-#include <zephyr/kernel.h>
+#include "adc.h"
+
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/adc.h>
+#include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+
 #include <m0p/dl_factoryregion.h>
-#include "adc.h"
 
 // Datasheet for the family specifies this as <-2.1, -1.7>, with
 // typical -1.8 mV/'C
@@ -18,38 +20,46 @@
 // Datasheet for the family specifies this as <27, 33>, with typical 30
 #define MSPM0G350X_TSTRIM 30
 
+/*
+ * Temperature sensor factory calibration reference voltage:
+ * - MSPM0G3507 (Datasheet 8.13): The unit-specific calibration value
+ * (TEMP_SENSE0) represents the 12-bit ADC result measured with the 3.3V VDD
+ * reference (VRSEL=0h).
+ * - MSPM0G5117 (Datasheet 8.14): The unit-specific calibration value
+ * (TEMP_SENSE0) represents the 12-bit ADC result measured with the 1.4-V
+ * internal VREF (VRSEL=2h, BUFCONFIG=1h).
+ */
+#if defined(CONFIG_SOC_MSPM0G5117) || defined(CONFIG_BOARD_MAUI_PROTO_5117)
+#define FACTORY_TRIM_VREF_MV 1400
+#else
+#define FACTORY_TRIM_VREF_MV 3300
+#endif
+
 LOG_MODULE_REGISTER(adc);
 
-#define DT_ADC_NODE_FROM_NODELABEL(node) ADC_DT_SPEC_STRUCT( \
-	DT_PARENT(DT_NODELABEL(node)), \
-	DT_PROP_BY_IDX(DT_NODELABEL(node), reg, 0))
+#define DT_ADC_NODE_FROM_NODELABEL(node)                  \
+	ADC_DT_SPEC_STRUCT(DT_PARENT(DT_NODELABEL(node)), \
+			   DT_PROP_BY_IDX(DT_NODELABEL(node), reg, 0))
 
 static const struct adc_dt_spec adc_channels[] = {
-	[ADC_CH_USB_HOST_CC1] =
-		DT_ADC_NODE_FROM_NODELABEL(adc_usb_host_cc1),
-	[ADC_CH_USB_HOST_CC2] =
-		DT_ADC_NODE_FROM_NODELABEL(adc_usb_host_cc2),
-	[ADC_CH_TEMP_SENSOR] =
-		DT_ADC_NODE_FROM_NODELABEL(adc_temp_sensor),
-	[ADC_CH_SBU1_DET] =
-		DT_ADC_NODE_FROM_NODELABEL(adc_sbu1_det),
-	[ADC_CH_SBU2_DET] =
-		DT_ADC_NODE_FROM_NODELABEL(adc_sbu2_det),
-	[ADC_CH_BSL] =
-		DT_ADC_NODE_FROM_NODELABEL(adc_bsl),
+	[ADC_CH_USB_HOST_CC1] = DT_ADC_NODE_FROM_NODELABEL(adc_usb_host_cc1),
+	[ADC_CH_USB_HOST_CC2] = DT_ADC_NODE_FROM_NODELABEL(adc_usb_host_cc2),
+	[ADC_CH_TEMP_SENSOR] = DT_ADC_NODE_FROM_NODELABEL(adc_temp_sensor),
+	[ADC_CH_SBU1_DET] = DT_ADC_NODE_FROM_NODELABEL(adc_sbu1_det),
+	[ADC_CH_SBU2_DET] = DT_ADC_NODE_FROM_NODELABEL(adc_sbu2_det),
+	[ADC_CH_BSL] = DT_ADC_NODE_FROM_NODELABEL(adc_bsl),
 	[ADC_CH_PPVAR_USB_CHG_VBUS] =
 		DT_ADC_NODE_FROM_NODELABEL(adc_ppvar_usb_chg_vbus),
 	[ADC_CH_PPVAR_USB_DUT_VBUS] =
 		DT_ADC_NODE_FROM_NODELABEL(adc_ppvar_usb_dut_vbus),
 	[ADC_CH_PP5000_USB_HOST_VBUS] =
 		DT_ADC_NODE_FROM_NODELABEL(adc_pp5000_usb_host_vbus),
-	[ADC_CH_PP5000] =
-		DT_ADC_NODE_FROM_NODELABEL(adc_pp5000),
+	[ADC_CH_PP5000] = DT_ADC_NODE_FROM_NODELABEL(adc_pp5000),
 };
 
-char* adc_channel_to_str(enum adc_type ch)
+char *adc_channel_to_str(enum adc_type ch)
 {
-	switch(ch) {
+	switch (ch) {
 	case ADC_CH_USB_HOST_CC1:
 		return "USB_HOST_CC1";
 	case ADC_CH_USB_HOST_CC2:
@@ -79,8 +89,8 @@ int adcs_init()
 {
 	int err;
 
-	for(unsigned a = 0; a < ADC_CH_COUNT; a++) {
-		if(!adc_channels[a].dev) {
+	for (unsigned a = 0; a < ADC_CH_COUNT; a++) {
+		if (!adc_channels[a].dev) {
 			LOG_ERR("Skipping channel %s", adc_channel_to_str(a));
 			continue;
 		}
@@ -146,8 +156,7 @@ static int cmd_status(const struct shell *sh, size_t argc, char **argv)
 	int mv;
 
 	shell_print(sh, "ADC values:");
-	for(unsigned a = 0; a < ADC_CH_COUNT; a++)
-	{
+	for (unsigned a = 0; a < ADC_CH_COUNT; a++) {
 		mv = adc_ch_read(a);
 		shell_print(sh, "[%20s] =% 5d mV", adc_channel_to_str(a), mv);
 	}
@@ -157,24 +166,22 @@ static int cmd_status(const struct shell *sh, size_t argc, char **argv)
 
 static int cmd_read(const struct shell *sh, size_t argc, char **argv)
 {
-	if(argc != 2) {
+	if (argc != 2) {
 		shell_print(sh, "Usage: adc read <channel_name>");
 		shell_print(sh, "Available channels:");
-		for(unsigned a = 0; a < ADC_CH_COUNT; a++)
-		{
+		for (unsigned a = 0; a < ADC_CH_COUNT; a++) {
 			shell_print(sh, "- %s", adc_channel_to_str(a));
 		}
 
 		return -EINVAL;
 	}
 
-	for(unsigned a = 0; a < ADC_CH_COUNT; a++)
-	{
-		if(strcmp(adc_channel_to_str(a), argv[1]))
+	for (unsigned a = 0; a < ADC_CH_COUNT; a++) {
+		if (strcmp(adc_channel_to_str(a), argv[1]))
 			continue;
 
-		shell_print(sh, "[%s] = %d mV",
-			adc_channel_to_str(a), adc_ch_read(a));
+		shell_print(sh, "[%s] = %d mV", adc_channel_to_str(a),
+			    adc_ch_read(a));
 
 		return 0;
 	}
@@ -189,15 +196,17 @@ static int cmd_temp(const struct shell *sh, size_t argc, char **argv)
 	int sense0 = DL_FactoryRegion_getTemperatureVoltage();
 
 #ifdef CONFIG_REQUIRES_FLOAT_PRINTF
-	float vTrim = (3.3f / 4096.0f) * ((float)sense0 - 0.5f);
-	float temp = (1.0f / (MSPM0G350X_TSC / 1000.0f)) *
-		(mv / 1000.0f - vTrim) + MSPM0G350X_TSTRIM;
+	float vTrim = ((float)FACTORY_TRIM_VREF_MV / 1000.0f / 4096.0f) *
+		      ((float)sense0 - 0.5f);
+	float temp =
+		(1.0f / (MSPM0G350X_TSC / 1000.0f)) * (mv / 1000.0f - vTrim) +
+		MSPM0G350X_TSTRIM;
 	shell_print(sh, "Temperature = %f 'C", (float)temp);
 #else
 	// The calculations are done in 1/100 of mV
-	int vTrim = (sense0 * 10 - 5) * 33000 / 4096;
-	int temp = ONE_BY_MSPM0G350X_TSC_INT_APROX * (mv * 100 - vTrim) / 100
-		+ MSPM0G350X_TSTRIM * 100;
+	int vTrim = (sense0 * 10 - 5) * (FACTORY_TRIM_VREF_MV * 10) / 4096;
+	int temp = ONE_BY_MSPM0G350X_TSC_INT_APROX * (mv * 100 - vTrim) / 100 +
+		   MSPM0G350X_TSTRIM * 100;
 
 	shell_print(sh, "Temperature = %d.%02d 'C", temp / 100, temp % 100);
 #endif
@@ -206,10 +215,11 @@ static int cmd_temp(const struct shell *sh, size_t argc, char **argv)
 }
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_adc_cmds,
-	SHELL_CMD(status, NULL, "Read all ADC channels", cmd_status),
-	SHELL_CMD(read, NULL, "Read one channel", cmd_read),
-	SHELL_SUBCMD_SET_END
-);
+			       SHELL_CMD(status, NULL, "Read all ADC channels",
+					 cmd_status),
+			       SHELL_CMD(read, NULL, "Read one channel",
+					 cmd_read),
+			       SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(adc, &sub_adc_cmds, "Commands to manipulate ADC", NULL);
 SHELL_CMD_REGISTER(temp, NULL, "Read internal temperature sensor", cmd_temp);

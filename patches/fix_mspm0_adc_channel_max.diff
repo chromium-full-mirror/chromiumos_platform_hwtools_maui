@@ -1,0 +1,16 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+diff --git a/drivers/adc/adc_mspm0_adc12.c b/drivers/adc/adc_mspm0_adc12.c
+--- a/drivers/adc/adc_mspm0_adc12.c
++++ b/drivers/adc/adc_mspm0_adc12.c
+@@ -27,7 +27,7 @@
+ #define ADC_CONTEXT_USES_KERNEL_TIMER
+ #include "adc_context.h"
+
+-#define ADC_MSPM0_CHANNEL_MAX            (ADC_SYS_NUM_ANALOG_CHAN)
++#define ADC_MSPM0_CHANNEL_MAX            32
+ #define ADC_MSPM0_CHANNEL_NO_INIT        (0xFF)
+ #define ADC_MSPM0_NUM_SAMPLE_TIMERS      2
+ #define ADC_MSPM0_MEM_CTL_STIME		 GENMASK(0, 0)

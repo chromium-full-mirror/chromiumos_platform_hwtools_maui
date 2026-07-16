@@ -4,9 +4,11 @@
 # found in the LICENSE file.
 
 ######################################################################
-# Prepare base container
+# Prepare base container using Debian Trixie for native Python 3.12
 ######################################################################
-FROM debian:bookworm-slim AS downloader
+FROM debian:trixie-slim AS downloader
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt update && apt upgrade -y && apt install -y --no-install-recommends \
   ca-certificates \
@@ -25,7 +27,7 @@ RUN apt update && apt upgrade -y && apt install -y --no-install-recommends \
   ninja-build \
   python3-dev \
   python3-pip \
-  python3-pyelftools \
+  python3-venv \
   python3-setuptools \
   python3-jsonschema \
   python3-tk \
@@ -35,19 +37,25 @@ RUN apt update && apt upgrade -y && apt install -y --no-install-recommends \
   xz-utils \
   && apt clean
 
+# Create a Python Virtual Environment that inherits system site-packages to cleanly blend system tools with workspace packages
+RUN python3 -m venv --system-site-packages /venv
+ENV PATH="/venv/bin:$PATH"
+
 # There are other packages required for Zephyr tooling, e.g. twister, best to install them now
 COPY dockerfiles/requirements.compiled .
-RUN pip install --break-system-packages --require-hashes -r requirements.compiled
+RUN pip install --no-deps --require-hashes -r requirements.compiled
 
 ######################################################################
-# Prepare Zephyr SDK
+# Prepare Zephyr SDK v1.0.1 natively
+######################################################################
 FROM downloader AS zephyr-sdk
-ARG ZEPHYR_VERSION=0.17.4
+ARG ZEPHYR_VERSION=1.0.1
 
 RUN wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_VERSION}/zephyr-sdk-${ZEPHYR_VERSION}_linux-x86_64_minimal.tar.xz -O /tmp/zephyr.tar.xz &&\
-  wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_VERSION}/toolchain_linux-x86_64_arm-zephyr-eabi.tar.xz -O /tmp/toolchain-arm.tar.xz &&\
+  wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_VERSION}/toolchain_gnu_linux-x86_64_arm-zephyr-eabi.tar.xz -O /tmp/toolchain-arm.tar.xz &&\
   tar xvf /tmp/zephyr.tar.xz -C /usr/local &&\
-  tar xvf /tmp/toolchain-arm.tar.xz -C /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/ &&\
+  mkdir -p /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/gnu &&\
+  tar xvf /tmp/toolchain-arm.tar.xz -C /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/gnu/ &&\
   /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/setup.sh -h -c &&\
   rm /tmp/*.tar.xz &&\
   cd /usr/local/zephyr-sdk-${ZEPHYR_VERSION} &&\
@@ -55,15 +63,16 @@ RUN wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHY
 
 ######################################################################
 # Prepare Zephyr repository
+######################################################################
 FROM downloader AS zephyr-repo
 
 RUN mkdir /zephyr
 WORKDIR /zephyr
-RUN git clone -b dev https://github.com/TexasInstruments/msp-zephyr.git zephyr
+RUN git clone -b device/mspm0g5187-support https://github.com/TexasInstruments/msp-zephyr.git zephyr
 
 WORKDIR /zephyr/zephyr
-RUN git checkout b27612fb49f501c94fbeff38b493d792377deb23
-RUN west init -l && west update msp-hal_ti cmsis cmsis_6 &&\
+RUN west init -l && west update hal_ti cmsis cmsis_6 &&\
+  cd /zephyr/modules/hal/ti && git remote add ti https://github.com/TexasInstruments/msp-hal_ti.git && git fetch ti dev && git checkout ti/dev &&\
   chmod +x /zephyr/zephyr/zephyr-env.sh &&\
   chmod o+w /zephyr/.west/config
 
@@ -71,12 +80,22 @@ RUN west init -l && west update msp-hal_ti cmsis cmsis_6 &&\
 COPY patches/fix_log_filter_get.diff .
 RUN git apply fix_log_filter_get.diff
 
+# TODO: remove when ADC channel max fix reaches upstream Zephyr
+COPY patches/fix_mspm0_adc_channel_max.diff .
+RUN git apply fix_mspm0_adc_channel_max.diff
+
+
+
 WORKDIR /
 RUN git clone --depth=1 https://chromium.googlesource.com/chromiumos/platform/dolos
 
 ######################################################################
 # Copy artifacts from previous stages
+######################################################################
 FROM downloader AS builder
+
+# Re-enable virtual environment path in the final builder stage
+ENV PATH="/venv/bin:$PATH"
 
 COPY --from=zephyr-sdk /usr/local/ /usr/local/
 COPY --from=zephyr-repo /zephyr /zephyr
@@ -84,6 +103,7 @@ COPY --from=zephyr-repo /dolos/tools/formatconverter/converter.py /usr/local/bin
 
 ######################################################################
 # Prepare scripts to build firmware
+######################################################################
 COPY dockerfiles/firmware_build.sh /firmware_build.sh
 COPY dockerfiles/firmware_test.sh /firmware_test.sh
 

@@ -1,8 +1,8 @@
-/*
- * Copyright 2022 The ChromiumOS Authors
+/* Copyright 2026 The ChromiumOS Authors
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
 #ifndef DT_BINDINGS_GPIO_DEFINES_H_
 #define DT_BINDINGS_GPIO_DEFINES_H_
 

@@ -1,0 +1,142 @@
+/* Copyright 2026 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+/dts-v1/;
+
+#include <ti/mspm0/g/mspm0g5117.dtsi>
+#include <ti/mspm0/g/mspm0g51xx-pinctrl.dtsi>
+
+#include <zephyr/dt-bindings/clock/mspm0_clock.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+#include "adc.dtsi"
+#include "../common/gpio.dtsi"
+
+/ {
+	model = "Google Maui Proto Board (MSPM0G5117)";
+	compatible = "google,maui-proto-5117", "ti,mspm0g5117";
+
+	aliases {
+		/* Resolves the 'zephyr_udc0' macro compile error */
+		zephyr-udc0 = &usbfs0;
+		pdc-debug-uart = &unicomm3_uart;
+	};
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		/* Route console and shell over physical UART first */
+		zephyr,console = &unicomm1_uart;
+		zephyr,shell-uart = &unicomm1_uart;
+	};
+
+	leds: leds {
+		compatible = "gpio-leds";
+
+		ec_led_green: ec_led_green {
+			gpios = <&gpioa 12 GPIO_ACTIVE_HIGH>;
+			label = "User LED Green";
+		};
+
+		ec_led_amber: ec_led_amber {
+			gpios = <&gpioa 13 GPIO_ACTIVE_HIGH>;
+			label = "User LED Amber";
+		};
+	};
+
+	hwrev {
+		compatible = "google,maui-hwrev";
+		gpios = <&gpioa 23 GPIO_ACTIVE_HIGH>,
+				<&gpioa 4 GPIO_ACTIVE_HIGH>,
+				<&gpioa 3 GPIO_ACTIVE_HIGH>;
+	};
+
+	dut_sbu_mux: dut-sbu-mux {
+		compatible = "google,maui-sbu-mux";
+		status = "okay";
+
+		pdc = <&pdc>;
+		mux-oe-gpios = <&gpiob 6 GPIO_ACTIVE_LOW>;
+		mux-sel-gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&cpu0 {
+	clock-frequency = <DT_FREQ_M(32)>;
+};
+
+&ulpclk {
+	clock-frequency = <DT_FREQ_M(32)>;
+	clk-div = <1>;
+};
+
+&mclk {
+	clock-frequency = <DT_FREQ_M(32)>;
+};
+
+&flash0 {
+	status = "okay";
+};
+
+&pinctrl {
+	status = "okay";
+};
+
+&gpioa {
+	status = "okay";
+};
+
+&gpiob {
+	status = "okay";
+};
+
+&unicomm0 {
+	unicomm0_i2c: unicomm0_i2c@40a80000 {
+		compatible = "ti,mspm0-i2c";
+		interrupts = <9 0>;
+		reg = <0x40a80000 0x00002000>;
+		clocks = <&ckm MSPM0_CLOCK_ULPCLK>;
+		status = "okay";
+		clock-frequency = <100000>;
+		pinctrl-0 = <&uc0_scl_pa1 &uc0_sda_pa0>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		pdc: tps6699x@20 {
+			compatible = "ti,tps6699x";
+			reg = <0x20>;
+			irq-gpios = <&gpioa 28 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		};
+	};
+};
+
+&unicomm1_uart {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uc1_tx_pa10 &uc1_rx_pa11>;
+	pinctrl-names = "default";
+};
+
+&unicomm3_uart {
+	status = "okay";
+	current-speed = <12000000>;
+	pinctrl-0 = <&uc3_rx_pa9>;
+	pinctrl-names = "default";
+};
+
+&vref0 {
+	status = "disabled";
+};
+
+zephyr_udc0: &usbfs0 {
+	status = "okay";
+	maximum-speed = "full-speed";
+
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};

@@ -55,9 +55,18 @@ The host software is designed to be "Docker-first" to minimize dependencies on u
 ### Firmware
 The firmware is built using the `maui-builder` Docker container.
 
-To build the firmware:
+Supported Targets:
+* **`maui_proto_3507` (Default)**: TI MSPM0G3507 MCU with external FTDI UART bridge.
+* **`maui_proto_5117`**: TI MSPM0G5117 MCU with native USB Next stack (CDC ACM console, DFU flashing).
+
+To build the default firmware (`maui_proto_3507`):
 ```bash
 docker run --rm -v $(pwd):/repo maui-builder:latest
+```
+
+To build the `maui_proto_5117` firmware:
+```bash
+docker run --rm -v $(pwd):/repo maui-builder:latest -b maui_proto_5117 -p
 ```
 Artifacts: `firmware/build_docker/zephyr/zephyr.txt`.
 

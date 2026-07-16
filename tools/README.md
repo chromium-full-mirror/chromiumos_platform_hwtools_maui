@@ -109,14 +109,22 @@ Updates both MCU and PDC firmware to the version specified (default: `stable`).
 
 #### Microcontroller (MCU)
 
+Depending on your board hardware:
+* **`maui_proto_5117`**: Supports native USB flashing via DFU (`--usb`).
+* **`maui_proto_3507`**: Uses UART BSL flashing.
+
 **Flash from a local file:**
 ```bash
-./tools/scripts/maui-flash --serial <SERIAL> mcu --file /path/to/zephyr.txt
+# Native USB DFU (maui_proto_5117)
+./tools/scripts/maui-flash --usb mcu --file /path/to/zephyr.txt
+
+# UART BSL (maui_proto_3507 / explicit port)
+./tools/scripts/maui-flash --port /dev/ttyUSB0 mcu --file /path/to/zephyr.txt
 ```
 
 **Flash the 'stable' version:**
 ```bash
-./tools/scripts/maui-flash --serial <SERIAL> mcu --fw_channel stable
+./tools/scripts/maui-flash --usb mcu --fw_channel stable
 ```
 
 ## Development

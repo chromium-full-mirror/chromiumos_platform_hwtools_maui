@@ -1,0 +1,9 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+config BOARD_MAUI_PROTO_5117
+	select SOC_MSPM0G5117
+	select HAS_MSP_UNICOMM
+	select USE_MSPM0_DL_UNICOMM_UART
+	select USE_MSPM0_DL_UNICOMM_I2CC

@@ -58,18 +58,40 @@ To upload your changes to gerrit you can use:
 git push origin HEAD:refs/for/main
 ```
 
+## Supported Hardware Targets
+
+Maui supports two prototype MCU hardware variants:
+
+*   **`maui_proto_3507` (Default)**:
+    *   **MCU**: TI MSPM0G3507
+    *   **Features**: Prototype board relying on an external FTDI USB-to-UART bridge. The shell/console operates over physical UART, and flashing uses UART BSL mode.
+*   **`maui_proto_5117`**:
+    *   **MCU**: TI MSPM0G5117
+    *   **Features**: Uses the native on-chip USB hardware controller with Zephyr USB Next stack. The shell/console operates directly over USB CDC ACM (`/dev/ttyACM*`), and flashing uses native USB DFU mode (`--usb`).
+
 ## Build firmware using Docker
 
-While being in `maui` directory (root of this repository), execute:
+While being in `maui` directory (root of this repository), build the builder image:
 
 ```shell
 docker build -t maui-builder -f dockerfiles/Dockerfile.fw_builder .
-docker run -it -v `pwd`:/repo maui-builder:latest
 ```
 
-This will generate a txt firmware file in
+To build the default target (**`maui_proto_3507`**):
+
+```shell
+docker run --rm -v $(pwd):/repo maui-builder:latest
+```
+
+To build the **`maui_proto_5117`** target:
+
+```shell
+docker run --rm -v $(pwd):/repo maui-builder:latest -b maui_proto_5117 -p
+```
+
+This will generate a text-format firmware file in:
 `firmware/build_docker/zephyr/zephyr.txt`
-This file can be used to flash Maui using BSL.
+This file can be used to flash Maui using BSL or DFU.
 
 ## Unit Testing
 
