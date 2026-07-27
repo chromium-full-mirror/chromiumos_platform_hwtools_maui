@@ -27,7 +27,7 @@ Host Software:
     *   `boards/`: Board definitions (devicetree, Kconfig defconfig).
     *   `dts/`: Custom Device Tree bindings.
 *   `dockerfiles/`: Docker definitions.
-    *   `Dockerfile.fw_builder`: For building firmware.
+    *   `Dockerfile.fw_builder`: Parametrized builder Dockerfile for MCU firmware (`maui-builder` for `maui_proto_3507` and `maui-builder-5117` for `maui_proto_5117`).
     *   `Dockerfile.utils`: For host tools container (`maui-utils`).
 *   `tools/`: Host-side tools and scripts.
     *   `maui_libs/`: Core Python libraries (Device abstraction, Transport, PDC update logic).
@@ -53,21 +53,16 @@ The host software is designed to be "Docker-first" to minimize dependencies on u
 ## Build Instructions
 
 ### Firmware
-The firmware is built using the `maui-builder` Docker container.
+The firmware is built using dedicated Docker builder containers.
 
 Supported Targets:
 * **`maui_proto_3507` (Default)**: TI MSPM0G3507 MCU with external FTDI UART bridge.
+  * **Build image**: `docker build -t maui-builder -f dockerfiles/Dockerfile.fw_builder .`
+  * **Compile**: `docker run --rm -v $(pwd):/repo maui-builder:latest`
 * **`maui_proto_5117`**: TI MSPM0G5117 MCU with native USB Next stack (CDC ACM console, DFU flashing).
+  * **Build image**: `docker build -t maui-builder-5117 --build-arg BOARD=maui_proto_5117 -f dockerfiles/Dockerfile.fw_builder .`
+  * **Compile**: `docker run --rm -v $(pwd):/repo maui-builder-5117:latest -b maui_proto_5117 -p`
 
-To build the default firmware (`maui_proto_3507`):
-```bash
-docker run --rm -v $(pwd):/repo maui-builder:latest
-```
-
-To build the `maui_proto_5117` firmware:
-```bash
-docker run --rm -v $(pwd):/repo maui-builder:latest -b maui_proto_5117 -p
-```
 Artifacts: `firmware/build_docker/zephyr/zephyr.txt`.
 
 ### Host Tools Container

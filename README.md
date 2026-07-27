@@ -71,22 +71,32 @@ Maui supports two prototype MCU hardware variants:
 
 ## Build firmware using Docker
 
-While being in `maui` directory (root of this repository), build the builder image:
+While in the `maui` root directory of this repository:
+
+### 1. Building for `maui_proto_3507` (Default)
+Build the Docker builder image for **`maui_proto_3507`**:
 
 ```shell
 docker build -t maui-builder -f dockerfiles/Dockerfile.fw_builder .
 ```
 
-To build the default target (**`maui_proto_3507`**):
+Compile the **`maui_proto_3507`** firmware:
 
 ```shell
 docker run --rm -v $(pwd):/repo maui-builder:latest
 ```
 
-To build the **`maui_proto_5117`** target:
+### 2. Building for `maui_proto_5117`
+Build the Docker builder image for **`maui_proto_5117`**:
 
 ```shell
-docker run --rm -v $(pwd):/repo maui-builder:latest -b maui_proto_5117 -p
+docker build -t maui-builder-5117 --build-arg BOARD=maui_proto_5117 -f dockerfiles/Dockerfile.fw_builder .
+```
+
+Compile the **`maui_proto_5117`** firmware:
+
+```shell
+docker run --rm -v $(pwd):/repo maui-builder-5117:latest -b maui_proto_5117 -p
 ```
 
 This will generate a text-format firmware file in:

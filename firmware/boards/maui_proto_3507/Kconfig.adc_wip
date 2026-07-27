@@ -1,0 +1,12 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+config ADC_MSPM0_ADC12_WIP
+	bool "TI ADC MSPM0 driver"
+	default y
+	depends on DT_HAS_TI_MSPM0_ADC12_WIP_ENABLED
+	select USE_MSPM0_DL_ADC
+	select PINCTRL
+	help
+	  Enable support for ADC12 on the TI MSPM0 series.

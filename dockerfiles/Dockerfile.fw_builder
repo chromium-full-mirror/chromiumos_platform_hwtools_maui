@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.4
-# Copyright 2025 The ChromiumOS Authors
+# Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 ######################################################################
-# Prepare base container using Debian Trixie for native Python 3.12
+# Prepare base container
 ######################################################################
 FROM debian:trixie-slim AS downloader
 
@@ -37,54 +37,80 @@ RUN apt update && apt upgrade -y && apt install -y --no-install-recommends \
   xz-utils \
   && apt clean
 
-# Create a Python Virtual Environment that inherits system site-packages to cleanly blend system tools with workspace packages
+# Create a Python Virtual Environment that inherits system site-packages
 RUN python3 -m venv --system-site-packages /venv
 ENV PATH="/venv/bin:$PATH"
 
-# There are other packages required for Zephyr tooling, e.g. twister, best to install them now
+# Install Zephyr dependencies
 COPY dockerfiles/requirements.compiled .
 RUN pip install --no-deps --require-hashes -r requirements.compiled
 
 ######################################################################
-# Prepare Zephyr SDK v1.0.1 natively
+# Prepare Zephyr SDK
 ######################################################################
 FROM downloader AS zephyr-sdk
-ARG ZEPHYR_VERSION=1.0.1
 
-RUN wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_VERSION}/zephyr-sdk-${ZEPHYR_VERSION}_linux-x86_64_minimal.tar.xz -O /tmp/zephyr.tar.xz &&\
-  wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_VERSION}/toolchain_gnu_linux-x86_64_arm-zephyr-eabi.tar.xz -O /tmp/toolchain-arm.tar.xz &&\
-  tar xvf /tmp/zephyr.tar.xz -C /usr/local &&\
-  mkdir -p /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/gnu &&\
-  tar xvf /tmp/toolchain-arm.tar.xz -C /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/gnu/ &&\
-  /usr/local/zephyr-sdk-${ZEPHYR_VERSION}/setup.sh -h -c &&\
-  rm /tmp/*.tar.xz &&\
-  cd /usr/local/zephyr-sdk-${ZEPHYR_VERSION} &&\
-  rm -rf xtensa* arc* aarch* micro* mips* nios2* riscv* sparc*
+ARG BOARD=maui_proto_3507
+
+RUN if [ "$BOARD" = "maui_proto_5117" ] || [ "$BOARD" = "5117" ]; then \
+      ZEPHYR_SDK_VERSION="1.0.1"; \
+      TOOLCHAIN_TAR="toolchain_gnu_linux-x86_64_arm-zephyr-eabi.tar.xz"; \
+      TOOLCHAIN_SUBDIR="/gnu"; \
+    else \
+      ZEPHYR_SDK_VERSION="0.17.4"; \
+      TOOLCHAIN_TAR="toolchain_linux-x86_64_arm-zephyr-eabi.tar.xz"; \
+      TOOLCHAIN_SUBDIR=""; \
+    fi && \
+    wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz -O /tmp/zephyr.tar.xz && \
+    wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/${TOOLCHAIN_TAR} -O /tmp/toolchain-arm.tar.xz && \
+    tar xvf /tmp/zephyr.tar.xz -C /usr/local && \
+    mkdir -p /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION}${TOOLCHAIN_SUBDIR} && \
+    tar xvf /tmp/toolchain-arm.tar.xz -C /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION}${TOOLCHAIN_SUBDIR} && \
+    /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION}/setup.sh -h -c && \
+    rm /tmp/*.tar.xz && \
+    cd /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION} && \
+    rm -rf xtensa* arc* aarch* micro* mips* nios2* riscv* sparc*
 
 ######################################################################
 # Prepare Zephyr repository
 ######################################################################
 FROM downloader AS zephyr-repo
 
-RUN mkdir /zephyr
-WORKDIR /zephyr
-RUN git clone -b device/mspm0g5187-support https://github.com/TexasInstruments/msp-zephyr.git zephyr
+ARG BOARD=maui_proto_3507
+
+RUN if [ "$BOARD" = "maui_proto_5117" ] || [ "$BOARD" = "5117" ]; then \
+      ZEPHYR_BRANCH="device/mspm0g5187-support"; \
+      ZEPHYR_COMMIT=""; \
+      WEST_MODULES="hal_ti cmsis cmsis_6"; \
+      FETCH_TI_DEV="true"; \
+    else \
+      ZEPHYR_BRANCH="dev"; \
+      ZEPHYR_COMMIT="b27612fb49f501c94fbeff38b493d792377deb23"; \
+      WEST_MODULES="msp-hal_ti cmsis cmsis_6"; \
+      FETCH_TI_DEV="false"; \
+    fi && \
+    mkdir -p /zephyr && cd /zephyr && \
+    git clone -b ${ZEPHYR_BRANCH} https://github.com/TexasInstruments/msp-zephyr.git zephyr && \
+    cd zephyr && \
+    if [ -n "${ZEPHYR_COMMIT}" ]; then git checkout ${ZEPHYR_COMMIT}; fi && \
+    west init -l && west update ${WEST_MODULES} && \
+    if [ "${FETCH_TI_DEV}" = "true" ]; then \
+      cd /zephyr/modules/hal/ti && git remote add ti https://github.com/TexasInstruments/msp-hal_ti.git && git fetch ti dev && git checkout ti/dev; \
+    fi && \
+    chmod +x /zephyr/zephyr/zephyr-env.sh && \
+    chmod o+w /zephyr/.west/config
 
 WORKDIR /zephyr/zephyr
-RUN west init -l && west update hal_ti cmsis cmsis_6 &&\
-  cd /zephyr/modules/hal/ti && git remote add ti https://github.com/TexasInstruments/msp-hal_ti.git && git fetch ti dev && git checkout ti/dev &&\
-  chmod +x /zephyr/zephyr/zephyr-env.sh &&\
-  chmod o+w /zephyr/.west/config
 
 # TODO(b/492139328): remove when merged to Zephyr
 COPY patches/fix_log_filter_get.diff .
 RUN git apply fix_log_filter_get.diff
 
 # TODO: remove when ADC channel max fix reaches upstream Zephyr
-COPY patches/fix_mspm0_adc_channel_max.diff .
-RUN git apply fix_mspm0_adc_channel_max.diff
-
-
+COPY patches/fix_mspm0_adc_channel_max.diff /tmp/fix_mspm0_adc_channel_max.diff
+RUN if [ "$BOARD" = "maui_proto_5117" ] || [ "$BOARD" = "5117" ]; then \
+      git apply /tmp/fix_mspm0_adc_channel_max.diff; \
+    fi
 
 WORKDIR /
 RUN git clone --depth=1 https://chromium.googlesource.com/chromiumos/platform/dolos
@@ -94,7 +120,6 @@ RUN git clone --depth=1 https://chromium.googlesource.com/chromiumos/platform/do
 ######################################################################
 FROM downloader AS builder
 
-# Re-enable virtual environment path in the final builder stage
 ENV PATH="/venv/bin:$PATH"
 
 COPY --from=zephyr-sdk /usr/local/ /usr/local/
