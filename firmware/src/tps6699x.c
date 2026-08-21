@@ -2,7 +2,9 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+#include "adc.h"
 #include "bypass.h"
+#include "led.h"
 #include "tps6699x.h"
 #include "tps6699x_reg.h"
 
@@ -35,6 +37,13 @@
  */
 #define TPS_STREAM_CHUNK_SIZE (24)
 
+/*
+ * The TPS6699x answers on a separate I2C target address per USB-C port. The
+ * DT node holds the port 1 (DUT) address; with the address strapping used on
+ * Maui, port 2 (Charger) sits 4 above it (0x20 -> 0x24).
+ */
+#define TPS_PORT2_I2C_ADDR_OFFSET 4
+
 LOG_MODULE_REGISTER(tps6699x, CONFIG_LOG_DEFAULT_LEVEL);
 
 /**
@@ -62,6 +71,8 @@ struct tps6699x_data {
 #endif
 	const struct device *dev;
 	int forced_debug_accessory_mode;
+	bool dut_connected;
+	bool charger_connected;
 };
 
 static const struct tps6699x_config tps6699x_config = {
@@ -111,6 +122,91 @@ static int tps_uart_init()
 	return 0;
 }
 #endif
+
+static inline uint16_t
+tps_port_to_i2c_addr(const struct tps6699x_config *config, enum tps_port port)
+{
+	if (port == TPS_PORT_CHARGER) {
+		return config->i2c.addr + TPS_PORT2_I2C_ADDR_OFFSET;
+	}
+	return config->i2c.addr;
+}
+
+static int tps_read_reg_port(const struct tps6699x_config *config,
+			     enum tps_port port, enum tps6699x_reg reg,
+			     uint8_t *buf, uint8_t len)
+{
+	uint8_t byte_cnt;
+	const struct i2c_dt_spec port_i2c = {
+		.bus = config->i2c.bus,
+		.addr = tps_port_to_i2c_addr(config, port),
+	};
+
+	struct i2c_msg msg[] = {
+		{
+			.buf = (uint8_t *)&reg,
+			.len = 1,
+			.flags = I2C_MSG_WRITE,
+		},
+		{
+			.buf = &byte_cnt,
+			.len = 1,
+			.flags = I2C_MSG_READ | I2C_MSG_RESTART,
+		},
+		{
+			.buf = buf,
+			.len = len,
+			.flags = I2C_MSG_READ | I2C_MSG_STOP,
+		},
+	};
+
+	return i2c_transfer_dt(&port_i2c, msg, ARRAY_SIZE(msg));
+}
+
+static int tps_write_reg_port(const struct tps6699x_config *config,
+			      enum tps_port port, enum tps6699x_reg reg,
+			      uint8_t *buf, uint8_t len)
+{
+	const struct i2c_dt_spec port_i2c = {
+		.bus = config->i2c.bus,
+		.addr = tps_port_to_i2c_addr(config, port),
+	};
+
+	struct i2c_msg msg[] = {
+		{
+			.buf = (uint8_t *)&reg,
+			.len = 1,
+			.flags = I2C_MSG_WRITE,
+		},
+		{
+			.buf = &len,
+			.len = 1,
+			.flags = I2C_MSG_WRITE,
+		},
+		{
+			.buf = buf,
+			.len = len,
+			.flags = I2C_MSG_WRITE | I2C_MSG_STOP,
+		},
+	};
+
+	return i2c_transfer_dt(&port_i2c, msg, ARRAY_SIZE(msg));
+}
+
+static int tps_xfer_reg_port(const struct tps6699x_config *config,
+			     enum tps_port port, enum tps6699x_reg reg,
+			     uint8_t *buf, uint8_t len, int flag)
+{
+	if (!config || (!buf && len > 0)) {
+		return -EINVAL;
+	}
+
+	if (flag == I2C_MSG_READ) {
+		return tps_read_reg_port(config, port, reg, buf, len);
+	} else {
+		return tps_write_reg_port(config, port, reg, buf, len);
+	}
+}
 
 static int tps_read_reg(const struct i2c_dt_spec *i2c, enum tps6699x_reg reg,
 			uint8_t *buf, uint8_t len)
@@ -334,6 +430,11 @@ int run_task_sync(const struct device *dev, enum command_task task,
 	int rv;
 	char task_str[5];
 
+	if (write_len > sizeof(union reg_data) ||
+	    read_len > sizeof(union reg_data)) {
+		return -EINVAL;
+	}
+
 	command_task_to_string(task, task_str);
 
 	k_mutex_lock(&data->lock, K_FOREVER);
@@ -380,7 +481,7 @@ int run_task_sync(const struct device *dev, enum command_task task,
 		} else if (cmd.command == 0x444d4321) {
 			/* Unknown command ("!CMD") */
 			LOG_ERR("Command '%s' is invalid", task_str);
-			rv = -1;
+			rv = -ENOTSUP;
 			goto unlock_exit;
 		}
 
@@ -518,17 +619,71 @@ int tps_discover_identity(const struct device *dev,
 	return rv;
 }
 
-int tps_rd_status(const struct device *dev, union reg_status *buf)
+int tps_rd_status_port(const struct device *dev, enum tps_port port,
+		       union reg_status *buf)
 {
 	const struct tps6699x_config *config = dev->config;
 	struct tps6699x_data *data = dev->data;
 	int ret;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
-	ret = tps_xfer_reg(&config->i2c, REG_STATUS, buf->raw_value,
-			   sizeof(union reg_status), I2C_MSG_READ);
+	ret = tps_xfer_reg_port(config, port, REG_STATUS, buf->raw_value,
+				sizeof(union reg_status), I2C_MSG_READ);
 	k_mutex_unlock(&data->lock);
 
+	return ret;
+}
+
+int tps_rd_status(const struct device *dev, union reg_status *buf)
+{
+	return tps_rd_status_port(dev, TPS_PORT_DUT, buf);
+}
+
+int tps_rd_active_pdo(const struct device *dev, enum tps_port port,
+		      uint32_t *pdo)
+{
+	const struct tps6699x_config *config = dev->config;
+	struct tps6699x_data *data = dev->data;
+	int ret;
+	uint8_t raw[4] = { 0 };
+
+	if (!pdo) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = tps_read_reg_port(config, port, REG_ACTIVE_PDO_CONTRACT, raw,
+				sizeof(raw));
+	k_mutex_unlock(&data->lock);
+
+	if (ret == 0) {
+		*pdo = (uint32_t)raw[0] | ((uint32_t)raw[1] << 8) |
+		       ((uint32_t)raw[2] << 16) | ((uint32_t)raw[3] << 24);
+	}
+	return ret;
+}
+
+int tps_rd_active_rdo(const struct device *dev, enum tps_port port,
+		      uint32_t *rdo)
+{
+	const struct tps6699x_config *config = dev->config;
+	struct tps6699x_data *data = dev->data;
+	int ret;
+	uint8_t raw[4] = { 0 };
+
+	if (!rdo) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = tps_read_reg_port(config, port, REG_ACTIVE_RDO_CONTRACT, raw,
+				sizeof(raw));
+	k_mutex_unlock(&data->lock);
+
+	if (ret == 0) {
+		*rdo = (uint32_t)raw[0] | ((uint32_t)raw[1] << 8) |
+		       ((uint32_t)raw[2] << 16) | ((uint32_t)raw[3] << 24);
+	}
 	return ret;
 }
 
@@ -587,7 +742,18 @@ void tps_decode_identity(const union reg_rx_identity_sop *rx_id,
 }
 
 #ifdef CONFIG_TPS6699X_INTERRUPTS
-static void tps_handle_new_contract(struct tps6699x_data *data)
+static void tps_update_leds(struct tps6699x_data *data)
+{
+	if (!data->charger_connected) {
+		led_set_pattern(LED_AMBER, LED_PATTERN_OFF);
+	} else if (data->dut_connected) {
+		led_set_pattern(LED_AMBER, LED_PATTERN_BLINK_SLOW);
+	} else {
+		led_set_pattern(LED_AMBER, LED_PATTERN_SOLID_ON);
+	}
+}
+
+static void tps_handle_new_contract_dut(struct tps6699x_data *data)
 {
 	const struct device *dev = data->dev;
 	int rv;
@@ -595,7 +761,10 @@ static void tps_handle_new_contract(struct tps6699x_data *data)
 	struct tps_pd_identity id;
 	union reg_status status;
 
-	LOG_INF("Handling New Contract As Provider");
+	LOG_INF("DUT Port: Handling New Contract");
+
+	data->dut_connected = true;
+	tps_update_leds(data);
 
 	/* Issue the AMDs 4CC command to force discovery */
 	rv = tps_discover_identity(dev, &rx_id);
@@ -607,7 +776,7 @@ static void tps_handle_new_contract(struct tps6699x_data *data)
 	tps_decode_identity(&rx_id, &id);
 
 	/* Read current status to check data role */
-	rv = tps_rd_status(dev, &status);
+	rv = tps_rd_status_port(dev, TPS_PORT_DUT, &status);
 	if (rv) {
 		LOG_ERR("Failed to read status: %d", rv);
 		return;
@@ -641,6 +810,32 @@ static void tps_handle_new_contract(struct tps6699x_data *data)
 			id.usb_host, id.usb_device);
 
 		bypass_set_mode(BYPASS_MODE_H2H);
+	}
+}
+
+static void tps_handle_new_contract_charger(struct tps6699x_data *data)
+{
+	const struct device *dev = data->dev;
+	union reg_status status;
+	uint32_t pdo = 0;
+	int rv;
+
+	LOG_INF("Charger Port: Handling New Contract");
+
+	data->charger_connected = true;
+	tps_update_leds(data);
+
+	rv = tps_rd_status_port(dev, TPS_PORT_CHARGER, &status);
+	if (rv == 0) {
+		LOG_INF("Charger Port Status: Plug=%d, Role=%s, DataRole=%s",
+			status.plug_present,
+			status.port_role ? "Source" : "Sink",
+			status.data_role ? "DFP" : "UFP");
+	}
+
+	rv = tps_rd_active_pdo(dev, TPS_PORT_CHARGER, &pdo);
+	if (rv == 0 && pdo != 0) {
+		LOG_INF("Charger Port Active PDO: 0x%08x", pdo);
 	}
 }
 
@@ -690,8 +885,8 @@ static void tps_re_enable_work_handler(struct k_work *work)
 	union reg_port_config port_cfg;
 	int rv;
 
-	/* Read Status (0x1A) to check plug presence */
-	rv = tps_rd_status(dev, &status);
+	/* Read Status (0x1A) to check plug presence on DUT */
+	rv = tps_rd_status_port(dev, TPS_PORT_DUT, &status);
 	if (rv) {
 		LOG_ERR("Failed to read Status: %d", rv);
 		return;
@@ -701,6 +896,9 @@ static void tps_re_enable_work_handler(struct k_work *work)
 		/* Device re-connected or never disconnected, nothing to do */
 		return;
 	}
+
+	data->dut_connected = false;
+	tps_update_leds(data);
 
 	/* Reset Mux to default Bridge Mode */
 	bypass_set_mode(BYPASS_MODE_H2H);
@@ -730,30 +928,31 @@ static void tps_re_enable_work_handler(struct k_work *work)
 	LOG_INF("Debug Accessory Advertisement re-enabled on Port A");
 }
 
-static void tps_handle_plug_insert_or_removal(struct tps6699x_data *data)
+static void tps_handle_plug_insert_or_removal_dut(struct tps6699x_data *data)
 {
 	const struct device *dev = data->dev;
 	union reg_status status;
 	int rv;
 
+	rv = tps_rd_status_port(dev, TPS_PORT_DUT, &status);
+	if (rv) {
+		LOG_ERR("Failed to read DUT Status: %d", rv);
+		return;
+	}
+
+	LOG_INF("DUT Port: Plug event (plug_present=%d)", status.plug_present);
+
+	data->dut_connected = (status.plug_present != 0);
+	tps_update_leds(data);
+
 	if (data->forced_debug_accessory_mode != DEBUG_ACCESSORY_AUTO) {
 		return;
 	}
 
-	/* Read Status (0x1A) to check plug presence */
-	rv = tps_rd_status(dev, &status);
-	if (rv) {
-		LOG_ERR("Failed to read Status: %d", rv);
-		return;
-	}
-
-	LOG_INF("Handling Plug Insert or Removal (plug_present=%d)",
-		status.plug_present);
-
 	/* If plug is not present (disconnection), reset debug accessory
 	 * advertisement to default (enabled) */
 	if (status.plug_present == 0) {
-		LOG_INF("Disconnection detected, scheduling Port A config reset");
+		LOG_INF("DUT Disconnection detected, scheduling Port A config reset");
 
 		/* Schedule re-enabling after a delay to avoid loops and
 		 * debounce. 500ms is chosen to be longer than a typical port
@@ -761,10 +960,30 @@ static void tps_handle_plug_insert_or_removal(struct tps6699x_data *data)
 		 */
 		k_work_reschedule(&data->re_enable_work, K_MSEC(500));
 	} else {
-		LOG_INF("Connection detected, canceling any pending Port A config reset");
+		LOG_INF("DUT Connection detected, canceling any pending Port A config reset");
 		/* Cancel any pending re-enable if a device is connected */
 		k_work_cancel_delayable(&data->re_enable_work);
 	}
+}
+
+static void
+tps_handle_plug_insert_or_removal_charger(struct tps6699x_data *data)
+{
+	const struct device *dev = data->dev;
+	union reg_status status;
+	int rv;
+
+	rv = tps_rd_status_port(dev, TPS_PORT_CHARGER, &status);
+	if (rv) {
+		LOG_ERR("Failed to read Charger Status: %d", rv);
+		return;
+	}
+
+	LOG_INF("Charger Port: Plug event (plug_present=%d)",
+		status.plug_present);
+
+	data->charger_connected = (status.plug_present != 0);
+	tps_update_leds(data);
 }
 
 static void tps_irq_work_handler(struct k_work *work)
@@ -774,49 +993,105 @@ static void tps_irq_work_handler(struct k_work *work)
 	const struct device *dev = data->dev;
 	const struct tps6699x_config *config = dev->config;
 	union reg_interrupt irq_evt1 = { 0 };
+	union reg_interrupt irq_evt2 = { 0 };
 	int rv;
 	int i;
 	bool irq1_pending = false;
+	bool irq2_pending = false;
 
-	/* Read the pending interrupt events */
+	/* Read pending interrupt events for Port 1 (DUT) at address 0x20 */
 	k_mutex_lock(&data->lock, K_FOREVER);
-	rv = tps_read_reg(&config->i2c, REG_INTERRUPT_EVENT_FOR_I2C1,
-			  irq_evt1.raw_value, sizeof(union reg_interrupt));
+	rv = tps_read_reg_port(config, TPS_PORT_DUT,
+			       REG_INTERRUPT_EVENT_FOR_I2C1, irq_evt1.raw_value,
+			       sizeof(union reg_interrupt));
 	k_mutex_unlock(&data->lock);
 	if (rv) {
-		LOG_ERR("Read IRQ1 events failed (%d)", rv);
-		return;
+		LOG_ERR("Read DUT IRQ events failed (%d)", rv);
+	} else {
+		for (i = 0; i < sizeof(union reg_interrupt); i++) {
+			if (irq_evt1.raw_value[i]) {
+				irq1_pending = true;
+				break;
+			}
+		}
 	}
 
-	/* Check for pending events in I2C1 */
-	for (i = 0; i < sizeof(union reg_interrupt); i++) {
-		if (irq_evt1.raw_value[i]) {
-			irq1_pending = true;
+	/* Read pending interrupt events for Port 2 (Charger) at address 0x24 */
+	k_mutex_lock(&data->lock, K_FOREVER);
+	rv = tps_read_reg_port(config, TPS_PORT_CHARGER,
+			       REG_INTERRUPT_EVENT_FOR_I2C1, irq_evt2.raw_value,
+			       sizeof(union reg_interrupt));
+	k_mutex_unlock(&data->lock);
+	if (rv) {
+		LOG_ERR("Read Charger IRQ events failed (%d)", rv);
+	} else {
+		for (i = 0; i < sizeof(union reg_interrupt); i++) {
+			if (irq_evt2.raw_value[i]) {
+				irq2_pending = true;
+				break;
+			}
 		}
 	}
 
 	if (irq1_pending) {
-		LOG_DBG("IRQ1 Event: 0x%02x%02x%02x%02x...",
+		LOG_INF("DUT IRQ Event: 0x%02x%02x%02x%02x (plug=%d, producer=%d, consumer=%d)",
 			irq_evt1.raw_value[0], irq_evt1.raw_value[1],
-			irq_evt1.raw_value[2], irq_evt1.raw_value[3]);
+			irq_evt1.raw_value[2], irq_evt1.raw_value[3],
+			irq_evt1.plug_insert_or_removal,
+			irq_evt1.new_contract_as_producer,
+			irq_evt1.new_contract_as_consumer);
 
-		/* Process I2C1 Interrupts */
+		/* Clear handled interrupts on Port 1 */
+		k_mutex_lock(&data->lock, K_FOREVER);
+		tps_write_reg_port(config, TPS_PORT_DUT,
+				   REG_INTERRUPT_CLEAR_FOR_I2C1,
+				   irq_evt1.raw_value,
+				   sizeof(union reg_interrupt));
+		k_mutex_unlock(&data->lock);
+
+		/* Process Port 1 (DUT) Interrupts */
 		if (irq_evt1.new_contract_as_producer ||
 		    irq_evt1.new_contract_as_consumer) {
-			tps_handle_new_contract(data);
+			tps_handle_new_contract_dut(data);
 		}
 		if (irq_evt1.device_incompatible_error) {
 			tps_handle_device_incompatible(data);
 		}
 		if (irq_evt1.plug_insert_or_removal) {
-			tps_handle_plug_insert_or_removal(data);
+			tps_handle_plug_insert_or_removal_dut(data);
 		}
+	}
 
-		/* Clear handled interrupts */
+	if (irq2_pending) {
+		LOG_INF("Charger IRQ Event: 0x%02x%02x%02x%02x (plug=%d, producer=%d, consumer=%d)",
+			irq_evt2.raw_value[0], irq_evt2.raw_value[1],
+			irq_evt2.raw_value[2], irq_evt2.raw_value[3],
+			irq_evt2.plug_insert_or_removal,
+			irq_evt2.new_contract_as_producer,
+			irq_evt2.new_contract_as_consumer);
+
+		/* Clear handled interrupts on Port 2 */
 		k_mutex_lock(&data->lock, K_FOREVER);
-		tps_write_reg(&config->i2c, REG_INTERRUPT_CLEAR_FOR_I2C1,
-			      irq_evt1.raw_value, sizeof(union reg_interrupt));
+		tps_write_reg_port(config, TPS_PORT_CHARGER,
+				   REG_INTERRUPT_CLEAR_FOR_I2C1,
+				   irq_evt2.raw_value,
+				   sizeof(union reg_interrupt));
 		k_mutex_unlock(&data->lock);
+
+		/* Process Port 2 (Charger) Interrupts */
+		if (irq_evt2.new_contract_as_producer ||
+		    irq_evt2.new_contract_as_consumer) {
+			tps_handle_new_contract_charger(data);
+		}
+		if (irq_evt2.plug_insert_or_removal) {
+			tps_handle_plug_insert_or_removal_charger(data);
+		}
+	}
+
+	/* If IRQ is still asserted, re-submit work */
+	if (gpio_pin_get_dt(&config->irq_gpio) > 0) {
+		LOG_DBG("IRQ still asserted, re-submitting work");
+		k_work_submit(&data->irq_work);
 	}
 }
 
@@ -924,25 +1199,24 @@ static int cmd_pdc_dr_swap_handler(const struct shell *sh, size_t argc,
 	return 0;
 }
 
-static int cmd_pdc_status_handler(const struct shell *sh, size_t argc,
-				  char **argv)
+static void tps_print_port_status(const struct shell *sh,
+				  const struct device *dev, enum tps_port port)
 {
-	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	const char *port_name = (port == TPS_PORT_DUT) ? "DUT (Port 1)" :
+							 "Charger (Port 2)";
 	union reg_status status;
+	uint32_t pdo = 0;
+	uint32_t rdo = 0;
 	int rv;
 
-	if (!device_is_ready(dev)) {
-		shell_error(sh, "TPS6699x device not ready");
-		return -ENODEV;
-	}
+	shell_print(sh, "=== PDC Status: %s ===", port_name);
 
-	rv = tps_rd_status(dev, &status);
+	rv = tps_rd_status_port(dev, port, &status);
 	if (rv) {
-		shell_error(sh, "Failed to read Status: %d", rv);
-		return rv;
+		shell_error(sh, "  Failed to read Status: %d", rv);
+		return;
 	}
 
-	shell_print(sh, "PDC Status:");
 	shell_print(sh, "  Plug Present:     %s",
 		    status.plug_present ? "Yes" : "No");
 
@@ -958,6 +1232,159 @@ static int cmd_pdc_status_handler(const struct shell *sh, size_t argc,
 			    status.data_role ? "DFP (Host)" : "UFP (Device)");
 		shell_print(sh, "  EPR Mode Active:  %s",
 			    status.epr_mode_is_active ? "Yes" : "No");
+	}
+
+	/* Read Active PDO and RDO contracts */
+	rv = tps_rd_active_pdo(dev, port, &pdo);
+	if (rv == 0 && pdo != 0) {
+		tps_rd_active_rdo(dev, port, &rdo);
+		uint8_t pdo_type = (pdo >> 30) & 0x03;
+
+		shell_print(sh, "  Active Contract:");
+		shell_print(sh, "    Raw PDO:        0x%08x", pdo);
+		shell_print(sh, "    Raw RDO:        0x%08x", rdo);
+
+		if (pdo_type == 0) {
+			/* Fixed Supply */
+			uint32_t voltage_mv = ((pdo >> 10) & 0x3FF) * 50;
+			uint32_t max_curr_ma = (pdo & 0x3FF) * 10;
+			uint32_t op_curr_ma =
+				rdo ? (((rdo >> 10) & 0x3FF) * 10) :
+				      max_curr_ma;
+
+			shell_print(sh, "    Type:           Fixed Supply");
+			shell_print(sh, "    Voltage:        %d.%03d V",
+				    voltage_mv / 1000, voltage_mv % 1000);
+			shell_print(sh, "    Max Current:    %d.%02d A",
+				    max_curr_ma / 1000,
+				    (max_curr_ma % 1000) / 10);
+			if (rdo) {
+				shell_print(sh, "    Op Current:     %d.%02d A",
+					    op_curr_ma / 1000,
+					    (op_curr_ma % 1000) / 10);
+			}
+		} else if (pdo_type == 1) {
+			/* Battery Supply */
+			uint32_t max_v_mv = ((pdo >> 20) & 0x3FF) * 50;
+			uint32_t min_v_mv = ((pdo >> 10) & 0x3FF) * 50;
+			uint32_t max_p_mw = (pdo & 0x3FF) * 250;
+
+			shell_print(sh, "    Type:           Battery Supply");
+			shell_print(sh,
+				    "    Voltage Range:  %d.%03d V - %d.%03d V",
+				    min_v_mv / 1000, min_v_mv % 1000,
+				    max_v_mv / 1000, max_v_mv % 1000);
+			shell_print(sh, "    Max Power:      %d.%02d W",
+				    max_p_mw / 1000, (max_p_mw % 1000) / 10);
+		} else if (pdo_type == 2) {
+			/* Variable Supply */
+			uint32_t max_v_mv = ((pdo >> 20) & 0x3FF) * 50;
+			uint32_t min_v_mv = ((pdo >> 10) & 0x3FF) * 50;
+			uint32_t max_curr_ma = (pdo & 0x3FF) * 10;
+
+			shell_print(sh, "    Type:           Variable Supply");
+			shell_print(sh,
+				    "    Voltage Range:  %d.%03d V - %d.%03d V",
+				    min_v_mv / 1000, min_v_mv % 1000,
+				    max_v_mv / 1000, max_v_mv % 1000);
+			shell_print(sh, "    Max Current:    %d.%02d A",
+				    max_curr_ma / 1000,
+				    (max_curr_ma % 1000) / 10);
+		} else if (pdo_type == 3) {
+			/* APDO / PPS / AVS */
+			uint8_t apdo_type = (pdo >> 28) & 0x03;
+			if (apdo_type == 0) {
+				/* SPR PPS */
+				uint32_t min_v_mv = ((pdo >> 8) & 0xFF) * 100;
+				uint32_t max_v_mv = ((pdo >> 17) & 0xFF) * 100;
+				uint32_t max_curr_ma = (pdo & 0x7F) * 50;
+
+				shell_print(
+					sh,
+					"    Type:           Augmented (PPS)");
+				shell_print(
+					sh,
+					"    Voltage Range:  %d.%02d V - %d.%02d V",
+					min_v_mv / 1000, (min_v_mv % 1000) / 10,
+					max_v_mv / 1000,
+					(max_v_mv % 1000) / 10);
+				shell_print(sh, "    Max Current:    %d.%02d A",
+					    max_curr_ma / 1000,
+					    (max_curr_ma % 1000) / 10);
+				if (rdo) {
+					uint32_t op_v_mv =
+						((rdo >> 9) & 0xFFF) * 20;
+					uint32_t op_curr_ma = (rdo & 0x7F) * 50;
+					shell_print(
+						sh,
+						"    PPS Output:     %d.%03d V, %d.%02d A",
+						op_v_mv / 1000, op_v_mv % 1000,
+						op_curr_ma / 1000,
+						(op_curr_ma % 1000) / 10);
+				}
+			} else if (apdo_type == 1) {
+				/* EPR AVS */
+				uint32_t min_v_mv = ((pdo >> 8) & 0xFF) * 100;
+				uint32_t max_v_mv = ((pdo >> 17) & 0x1FF) * 100;
+				uint32_t pdp_w = pdo & 0xFF;
+
+				shell_print(
+					sh,
+					"    Type:           Augmented (EPR AVS)");
+				shell_print(
+					sh,
+					"    Voltage Range:  %d.%02d V - %d.%02d V",
+					min_v_mv / 1000, (min_v_mv % 1000) / 10,
+					max_v_mv / 1000,
+					(max_v_mv % 1000) / 10);
+				shell_print(sh, "    PDP Power:      %d W",
+					    pdp_w);
+			} else {
+				shell_print(
+					sh,
+					"    Type:           Augmented (Reserved/Unknown)");
+			}
+		}
+	} else {
+		shell_print(sh, "  Active Contract:  None");
+	}
+
+	/* Measured VBUS via ADC */
+	enum adc_type adc_ch = (port == TPS_PORT_DUT) ?
+				       ADC_CH_PPVAR_USB_DUT_VBUS :
+				       ADC_CH_PPVAR_USB_CHG_VBUS;
+	int vbus_mv = adc_ch_read(adc_ch);
+	if (vbus_mv >= 0) {
+		shell_print(sh, "  Measured VBUS:    %d.%03d V (%d mV)",
+			    vbus_mv / 1000, vbus_mv % 1000, vbus_mv);
+	} else {
+		shell_print(sh, "  Measured VBUS:    ADC read failed (%d)",
+			    vbus_mv);
+	}
+}
+
+static int cmd_pdc_status_handler(const struct shell *sh, size_t argc,
+				  char **argv)
+{
+	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "TPS6699x device not ready");
+		return -ENODEV;
+	}
+
+	if (argc == 1 || strcmp(argv[1], "all") == 0) {
+		tps_print_port_status(sh, dev, TPS_PORT_DUT);
+		shell_print(sh, "");
+		tps_print_port_status(sh, dev, TPS_PORT_CHARGER);
+	} else if (strcmp(argv[1], "dut") == 0) {
+		tps_print_port_status(sh, dev, TPS_PORT_DUT);
+	} else if (strcmp(argv[1], "charger") == 0 ||
+		   strcmp(argv[1], "chg") == 0) {
+		tps_print_port_status(sh, dev, TPS_PORT_CHARGER);
+	} else {
+		shell_error(sh, "Usage: pdc status [dut|charger|all]");
+		return -EINVAL;
 	}
 
 	return 0;
@@ -1055,12 +1482,36 @@ static int cmd_pdc_discovery_handler(const struct shell *sh, size_t argc,
 	return 0;
 }
 
+static int tps_set_debug_accessory_mode(const struct device *dev,
+					enum tps_debug_accessory_mode mode)
+{
+	const struct tps6699x_config *config = dev->config;
+	struct tps6699x_data *data = dev->data;
+	union reg_port_config port_cfg;
+	int rv;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	data->forced_debug_accessory_mode = mode;
+
+	rv = tps_xfer_reg(&config->i2c, REG_PORT_CONFIGURATION,
+			  port_cfg.raw_value, sizeof(union reg_port_config),
+			  I2C_MSG_READ);
+	if (rv == 0) {
+		port_cfg.debug_accessory_ad_enable =
+			(mode != DEBUG_ACCESSORY_OFF) ? 1 : 0;
+		rv = tps_xfer_reg(&config->i2c, REG_PORT_CONFIGURATION,
+				  port_cfg.raw_value,
+				  sizeof(union reg_port_config), I2C_MSG_WRITE);
+	}
+	k_mutex_unlock(&data->lock);
+
+	return rv;
+}
+
 static int cmd_pdc_debug_accessory_handler(const struct shell *sh, size_t argc,
 					   char **argv)
 {
 	const struct device *dev = DEVICE_DT_GET_ONE(ti_tps6699x);
-	struct tps6699x_data *data = dev->data;
-	union reg_port_config port_cfg;
 	int rv;
 
 	if (!device_is_ready(dev)) {
@@ -1069,44 +1520,26 @@ static int cmd_pdc_debug_accessory_handler(const struct shell *sh, size_t argc,
 	}
 
 	if (strcmp(argv[1], "auto") == 0) {
-		data->forced_debug_accessory_mode = DEBUG_ACCESSORY_AUTO;
-		rv = tps_rd_port_config(dev, &port_cfg);
+		rv = tps_set_debug_accessory_mode(dev, DEBUG_ACCESSORY_AUTO);
 		if (rv) {
-			shell_error(sh, "Read failed: %d", rv);
-			return rv;
-		}
-		port_cfg.debug_accessory_ad_enable = 1;
-		rv = tps_wr_port_config(dev, &port_cfg);
-		if (rv) {
-			shell_error(sh, "Write failed: %d", rv);
+			shell_error(sh, "Failed to set debug accessory: %d",
+				    rv);
 			return rv;
 		}
 		shell_print(sh, "Debug Accessory set to auto mode");
 	} else if (strcmp(argv[1], "on") == 0) {
-		data->forced_debug_accessory_mode = DEBUG_ACCESSORY_ON;
-		rv = tps_rd_port_config(dev, &port_cfg);
+		rv = tps_set_debug_accessory_mode(dev, DEBUG_ACCESSORY_ON);
 		if (rv) {
-			shell_error(sh, "Read failed: %d", rv);
-			return rv;
-		}
-		port_cfg.debug_accessory_ad_enable = 1;
-		rv = tps_wr_port_config(dev, &port_cfg);
-		if (rv) {
-			shell_error(sh, "Write failed: %d", rv);
+			shell_error(sh, "Failed to set debug accessory: %d",
+				    rv);
 			return rv;
 		}
 		shell_print(sh, "Debug Accessory forced ON");
 	} else if (strcmp(argv[1], "off") == 0) {
-		data->forced_debug_accessory_mode = DEBUG_ACCESSORY_OFF;
-		rv = tps_rd_port_config(dev, &port_cfg);
+		rv = tps_set_debug_accessory_mode(dev, DEBUG_ACCESSORY_OFF);
 		if (rv) {
-			shell_error(sh, "Read failed: %d", rv);
-			return rv;
-		}
-		port_cfg.debug_accessory_ad_enable = 0;
-		rv = tps_wr_port_config(dev, &port_cfg);
-		if (rv) {
-			shell_error(sh, "Write failed: %d", rv);
+			shell_error(sh, "Failed to set debug accessory: %d",
+				    rv);
 			return rv;
 		}
 		shell_print(sh, "Debug Accessory forced OFF");
@@ -1126,8 +1559,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      cmd_pdc_sbdf_handler, 2, 0),
 	SHELL_CMD_ARG(dr_swap, NULL, "Send DR_Swap command <dfp|ufp>",
 		      cmd_pdc_dr_swap_handler, 2, 0),
-	SHELL_CMD_ARG(status, NULL, "Read and print current status",
-		      cmd_pdc_status_handler, 1, 0),
+	SHELL_CMD_ARG(status, NULL,
+		      "Read and print current status [dut|charger|all]",
+		      cmd_pdc_status_handler, 1, 1),
 	SHELL_CMD_ARG(info, NULL, "Read and print chip info",
 		      cmd_pdc_info_handler, 1, 0),
 	SHELL_CMD_ARG(discovery, NULL,
@@ -1184,30 +1618,44 @@ static int tps_init_interrupt(const struct device *dev)
 		return ret;
 	}
 
-	/* Check if IRQ is already asserted */
-	if (gpio_pin_get_dt(&cfg->irq_gpio) > 0) {
-		LOG_INF("IRQ line already active, scheduling work");
-		k_work_submit(&data->irq_work);
-	}
+	/* Unmask DUT interrupts (Port 1 / address 0x20) */
+	union reg_interrupt irq_mask1 = { 0 };
 
-	/* Unmask "New Contract As Producer/Consumer", "Device Incompatible
-	 * Error", and "Plug Insert or Removal" interrupts */
-	union reg_interrupt irq_mask = { 0 };
-
-	irq_mask.new_contract_as_producer = 1;
-	irq_mask.new_contract_as_consumer = 1;
-	irq_mask.device_incompatible_error = 1;
-	irq_mask.plug_insert_or_removal = 1;
+	irq_mask1.new_contract_as_producer = 1;
+	irq_mask1.new_contract_as_consumer = 1;
+	irq_mask1.device_incompatible_error = 1;
+	irq_mask1.plug_insert_or_removal = 1;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
-	ret = tps_write_reg(&cfg->i2c, REG_INTERRUPT_MASK_FOR_I2C1,
-			    irq_mask.raw_value, sizeof(union reg_interrupt));
+	ret = tps_write_reg_port(cfg, TPS_PORT_DUT, REG_INTERRUPT_MASK_FOR_I2C1,
+				 irq_mask1.raw_value,
+				 sizeof(union reg_interrupt));
 	k_mutex_unlock(&data->lock);
 
 	if (ret == 0) {
-		LOG_INF("TPS6699X Interrupt Unmasked");
+		LOG_INF("TPS6699X DUT (Port 1) Interrupt Unmasked");
 	} else {
-		LOG_ERR("Failed to write IRQ mask: %d", ret);
+		LOG_ERR("Failed to write DUT IRQ mask: %d", ret);
+	}
+
+	/* Unmask Charger interrupts (Port 2 / address 0x24) */
+	union reg_interrupt irq_mask2 = { 0 };
+
+	irq_mask2.new_contract_as_producer = 1;
+	irq_mask2.new_contract_as_consumer = 1;
+	irq_mask2.plug_insert_or_removal = 1;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = tps_write_reg_port(cfg, TPS_PORT_CHARGER,
+				 REG_INTERRUPT_MASK_FOR_I2C1,
+				 irq_mask2.raw_value,
+				 sizeof(union reg_interrupt));
+	k_mutex_unlock(&data->lock);
+
+	if (ret == 0) {
+		LOG_INF("TPS6699X Charger (Port 2) Interrupt Unmasked");
+	} else {
+		LOG_ERR("Failed to write Charger IRQ mask: %d", ret);
 	}
 
 	return 0;
@@ -1226,6 +1674,8 @@ static int tps6699x_init(const struct device *dev)
 	 * After incompatible device is disconnected mode is back to default.
 	 */
 	data->forced_debug_accessory_mode = DEBUG_ACCESSORY_AUTO;
+	data->dut_connected = false;
+	data->charger_connected = false;
 
 	if (!i2c_is_ready_dt(&cfg->i2c)) {
 		LOG_ERR("I2C bus not ready");
@@ -1235,11 +1685,12 @@ static int tps6699x_init(const struct device *dev)
 	k_mutex_init(&data->lock);
 
 #ifdef CONFIG_TPS6699X_INTERRUPTS
-	union reg_status status;
+	union reg_status status_dut;
+	union reg_status status_chg;
 	int ret;
 
 	/* Probe PDC over I2C first before enabling GPIO interrupts */
-	ret = tps_rd_status(dev, &status);
+	ret = tps_rd_status_port(dev, TPS_PORT_DUT, &status_dut);
 	if (ret) {
 		LOG_WRN("Failed to read PDC status (%d); PDC not present", ret);
 		return ret;
@@ -1250,9 +1701,27 @@ static int tps6699x_init(const struct device *dev)
 		return ret;
 	}
 
-	if (status.plug_present) {
-		LOG_INF("Detected previous contract");
-		tps_handle_new_contract(dev->data);
+	/* Check for pre-existing contract / plug on DUT port */
+	if (status_dut.plug_present) {
+		LOG_INF("Detected previous DUT contract / plug");
+		data->dut_connected = true;
+	}
+
+	/* Check for pre-existing contract / plug on Charger port */
+	ret = tps_rd_status_port(dev, TPS_PORT_CHARGER, &status_chg);
+	if (ret == 0 && status_chg.plug_present) {
+		LOG_INF("Detected previous Charger contract / plug");
+		data->charger_connected = true;
+	}
+
+	tps_update_leds(data);
+
+	/* If any port is connected or IRQ line is active, schedule workqueue
+	 * handling */
+	if (data->dut_connected || data->charger_connected ||
+	    gpio_pin_get_dt(&cfg->irq_gpio) > 0) {
+		LOG_INF("Scheduling initial PDC work handler");
+		k_work_submit(&data->irq_work);
 	}
 #endif
 

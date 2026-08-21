@@ -126,11 +126,13 @@ enum tps_pd_data_role {
  * @brief Run SWDF or SWUF command to perform a data role swap
  *
  * @param dev Pointer to the TPS6699x device instance
- * @param role Data role to swap to (TPS_PD_DATA_ROLE_UFP or TPS_PD_DATA_ROLE_DFP)
+ * @param role Data role to swap to (TPS_PD_DATA_ROLE_UFP or
+ * TPS_PD_DATA_ROLE_DFP)
  *
  * @return 0 on success, else negative error code
  */
-int tps_cmd_data_role_swap(const struct device *dev, enum tps_pd_data_role role);
+int tps_cmd_data_role_swap(const struct device *dev,
+			   enum tps_pd_data_role role);
 
 /**
  * @brief Run DISC command to simulate port disconnect
@@ -175,7 +177,28 @@ int tps_discover_identity(const struct device *dev,
 			  union reg_rx_identity_sop *rx_id);
 
 /**
- * @brief Read Status
+ * @brief TPS6699x PD Ports
+ */
+enum tps_port {
+	TPS_PORT_DUT = 0,
+	TPS_PORT_CHARGER = 1,
+	TPS_PORT_COUNT = 2,
+};
+
+/**
+ * @brief Read Status for a specific port
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param port Port to query (TPS_PORT_DUT or TPS_PORT_CHARGER)
+ * @param buf pointer where data is stored
+ *
+ * @return 0 on success, else -EIO
+ */
+int tps_rd_status_port(const struct device *dev, enum tps_port port,
+		       union reg_status *buf);
+
+/**
+ * @brief Read Status (Port 1 / DUT)
  *
  * @param dev Pointer to the TPS6699x device instance
  * @param buf pointer where data is stored
@@ -183,6 +206,30 @@ int tps_discover_identity(const struct device *dev,
  * @return 0 on success, else -EIO
  */
 int tps_rd_status(const struct device *dev, union reg_status *buf);
+
+/**
+ * @brief Read Active Contract PDO for a specific port
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param port Port to query (TPS_PORT_DUT or TPS_PORT_CHARGER)
+ * @param pdo Pointer to store 32-bit active PDO
+ *
+ * @return 0 on success, else negative error code
+ */
+int tps_rd_active_pdo(const struct device *dev, enum tps_port port,
+		      uint32_t *pdo);
+
+/**
+ * @brief Read Active Contract RDO for a specific port
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param port Port to query (TPS_PORT_DUT or TPS_PORT_CHARGER)
+ * @param rdo Pointer to store 32-bit active RDO
+ *
+ * @return 0 on success, else negative error code
+ */
+int tps_rd_active_rdo(const struct device *dev, enum tps_port port,
+		      uint32_t *rdo);
 
 /**
  * @brief Read Port Configuration

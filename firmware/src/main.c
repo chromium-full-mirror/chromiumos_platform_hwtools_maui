@@ -40,19 +40,19 @@ int main(void)
 	ret = leds_init();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize LEDs (err %d)", ret);
-		led_set_state(LED_GREEN, LED_STATE_SYS_ERROR);
+		led_set_pattern(LED_GREEN, LED_PATTERN_BLINK_FAST);
 	}
 
 	ret = adcs_init();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize ADCs (err %d)", ret);
-		led_set_state(LED_GREEN, LED_STATE_SYS_ERROR);
+		led_set_pattern(LED_GREEN, LED_PATTERN_BLINK_FAST);
 	}
 
 	ret = init_usb();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize USB (err %d)", ret);
-		led_set_state(LED_GREEN, LED_STATE_SYS_ERROR);
+		led_set_pattern(LED_GREEN, LED_PATTERN_BLINK_FAST);
 	}
 
 	LOG_INF("Maui Firmware Initialized Successfully");

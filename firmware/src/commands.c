@@ -5,6 +5,7 @@
 
 #include "app_version.h"
 #include "gpio.h"
+#include "led.h"
 #include "tps6699x.h"
 
 #include <errno.h>
@@ -391,6 +392,74 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_SUBCMD_SET_END);
 #endif
 
+static int cmd_led_handler(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 2) {
+		shell_error(
+			sh,
+			"Usage: led <green|amber> <on|off|blink|auto> | status | reset");
+		return -EINVAL;
+	}
+
+	if (strcmp(argv[1], "status") == 0) {
+		shell_print(sh, "LED Status:");
+		shell_print(sh, "  Green: pattern=%s, overridden=%s",
+			    led_pattern_to_str(led_get_pattern(LED_GREEN)),
+			    led_is_overridden(LED_GREEN) ? "Yes" : "No");
+		shell_print(sh, "  Amber: pattern=%s, overridden=%s",
+			    led_pattern_to_str(led_get_pattern(LED_AMBER)),
+			    led_is_overridden(LED_AMBER) ? "Yes" : "No");
+		return 0;
+	}
+
+	if (strcmp(argv[1], "reset") == 0) {
+		led_clear_override(LED_GREEN);
+		led_clear_override(LED_AMBER);
+		shell_print(sh, "LED overrides reset to automatic control");
+		return 0;
+	}
+
+	enum led_id id;
+	if (strcmp(argv[1], "green") == 0) {
+		id = LED_GREEN;
+	} else if (strcmp(argv[1], "amber") == 0) {
+		id = LED_AMBER;
+	} else {
+		shell_error(sh, "Invalid LED: '%s' (must be green or amber)",
+			    argv[1]);
+		return -EINVAL;
+	}
+
+	if (argc < 3) {
+		shell_error(sh, "Usage: led %s <on|off|blink|auto>", argv[1]);
+		return -EINVAL;
+	}
+
+	if (strcmp(argv[2], "on") == 0) {
+		led_set_override(id, LED_OVERRIDE_ON);
+		shell_print(sh, "%s LED forced ON", argv[1]);
+	} else if (strcmp(argv[2], "off") == 0) {
+		led_set_override(id, LED_OVERRIDE_OFF);
+		shell_print(sh, "%s LED forced OFF", argv[1]);
+	} else if (strcmp(argv[2], "blink") == 0) {
+		led_set_override(id, LED_OVERRIDE_BLINK);
+		shell_print(sh, "%s LED forced BLINK", argv[1]);
+	} else if (strcmp(argv[2], "auto") == 0 ||
+		   strcmp(argv[2], "reset") == 0) {
+		led_clear_override(id);
+		shell_print(sh, "%s LED returned to automatic control",
+			    argv[1]);
+	} else {
+		shell_error(
+			sh,
+			"Invalid action: '%s' (must be on, off, blink, or auto)",
+			argv[2]);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 SHELL_CMD_REGISTER(reset, NULL, "Reset the device", cmd_reset_handler);
 SHELL_CMD_ARG_REGISTER(reboot, NULL,
 		       "Reboot the device [bootloader|ro-bootloader]",
@@ -408,6 +477,10 @@ SHELL_CMD_ARG_REGISTER(
 	"Log only specific modules, reset all, or show status.\n"
 	"Usage: log_exclusive <module1> [module2] ... | reset | status",
 	cmd_log_exclusive_handler, 2, 10);
+SHELL_CMD_ARG_REGISTER(
+	led, NULL,
+	"Control LEDs: led <green|amber> <on|off|blink|auto> | status | reset",
+	cmd_led_handler, 2, 1);
 #if DT_HAS_COMPAT_STATUS_OKAY(ti_tps6699x)
 SHELL_CMD_REGISTER(power_dut, NULL, "Control DUT power <on|off|cycle>",
 		   cmd_power_dut_handler);

@@ -147,6 +147,14 @@ int adcs_init(void)
 	return (ready == present) ? 0 : -EIO;
 }
 
+/*
+ * Voltage divider for USB VBUS channels:
+ * VBUS -> 100k (R_top) -> ADC pin -> 12k (R_bot) -> GND
+ * V_VBUS = V_ADC * (100k + 12k) / 12k
+ */
+#define VBUS_DIVIDER_R_TOP_KOHM 100
+#define VBUS_DIVIDER_R_BOT_KOHM 12
+
 int adc_ch_read(enum adc_type ch)
 {
 	int err;
@@ -182,6 +190,14 @@ int adc_ch_read(enum adc_type ch)
 		LOG_ERR("Couldn't convert value of ADC channel: %s",
 			adc_channel_name(ch));
 		return err;
+	}
+
+	if (ch == ADC_CH_PPVAR_USB_CHG_VBUS ||
+	    ch == ADC_CH_PPVAR_USB_DUT_VBUS) {
+		val_mv = (val_mv * (VBUS_DIVIDER_R_TOP_KOHM +
+				    VBUS_DIVIDER_R_BOT_KOHM) +
+			  (VBUS_DIVIDER_R_BOT_KOHM / 2)) /
+			 VBUS_DIVIDER_R_BOT_KOHM;
 	}
 
 	return val_mv;
