@@ -112,6 +112,10 @@ RUN if [ "$BOARD" = "maui_proto_5117" ] || [ "$BOARD" = "5117" ]; then \
       git apply /tmp/fix_mspm0_adc_channel_max.diff; \
     fi
 
+# TODO: remove when MSPM0 I2C controller deadlock fix reaches upstream Zephyr
+COPY patches/fix_mspm0_i2c_deadlock.diff .
+RUN git apply fix_mspm0_i2c_deadlock.diff
+
 WORKDIR /
 RUN git clone --depth=1 https://chromium.googlesource.com/chromiumos/platform/dolos
 

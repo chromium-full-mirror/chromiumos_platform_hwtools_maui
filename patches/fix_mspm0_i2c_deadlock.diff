@@ -1,0 +1,181 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+drivers: i2c: mspm0: fix controller receive deadlock and multi-interrupt handling
+
+1. Fix controller receive deadlock on short reads (<= 8 bytes):
+   When receiving small packets that fit within the 8-byte MSPM0 RX FIFO,
+   the STOP condition occurs while data->state is still I2C_MSPM0_RX_STARTED.
+   Previously, the STOP handler only acted if state == I2C_MSPM0_RX_INPROGRESS,
+   silently dropping the STOP event and leaving device_sync_sem un-signaled,
+   which deadlocked k_sem_take(..., K_FOREVER).
+   Fix this by draining any remaining RX FIFO bytes and signaling device_sync_sem
+   for both RX_STARTED and RX_INPROGRESS states.
+
+2. Loop over all pending interrupts in i2c_mspm0_isr_controller:
+   DL_I2C_getPendingInterrupt() returns the highest priority interrupt and
+   clears it. When multiple interrupt events fire simultaneously (e.g.
+   RXFIFO_TRIGGER followed immediately by STOP), evaluate all pending interrupts
+   in a loop until DL_I2C_IIDX_NO_INT.
+
+3. Unconditionally signal device_sync_sem on NACK and ARBITRATION_LOST:
+   Ensure error states immediately release waiting threads instead of hanging.
+
+4. Add 100ms safety timeouts to k_sem_take(device_sync_sem) in receive/transmit:
+   Prevent indefinite kernel lockups if bus glitches or hardware lockups occur.
+
+diff --git a/drivers/i2c/i2c_mspm0.c b/drivers/i2c/i2c_mspm0.c
+index b224d5480b8..541dab1769d 100644
+--- a/drivers/i2c/i2c_mspm0.c
++++ b/drivers/i2c/i2c_mspm0.c
+@@ -283,8 +283,13 @@ static int i2c_mspm0_receive(const struct device *dev, struct i2c_msg msg, uint1
+ 				data->transfer_len, DL_I2C_CONTROLLER_START_ENABLE, stop,
+ 				DL_I2C_CONTROLLER_ACK_DISABLE);
+ 
+-	/* Wait for the read to complete */
+-	k_sem_take(data->device_sync_sem, K_FOREVER);
++	/* Wait for the read to complete with a safety timeout */
++	if (k_sem_take(data->device_sync_sem, K_MSEC(100)) != 0) {
++		data->state = I2C_MSPM0_TIMEOUT;
++		DL_I2C_disableInterrupt(config->base, TI_MSPM0_CONTROLLER_INTERRUPTS);
++		DL_I2C_clearInterruptStatus(config->base, TI_MSPM0_CONTROLLER_INTERRUPTS);
++		return -ETIMEDOUT;
++	}
+ 
+ 	if (data->state == I2C_MSPM0_TIMEOUT) {
+ 		return -ETIMEDOUT;
+@@ -338,8 +343,14 @@ static int i2c_mspm0_transmit(const struct device *dev, struct i2c_msg msg, uint
+ 				data->transfer_len, DL_I2C_CONTROLLER_START_ENABLE, stop,
+ 				DL_I2C_CONTROLLER_ACK_ENABLE);
+ 
+-	/* Wait for the transmit to complete */
+-	k_sem_take(data->device_sync_sem, K_FOREVER);
++	/* Wait for the transmit to complete with a safety timeout */
++	if (k_sem_take(data->device_sync_sem, K_MSEC(100)) != 0) {
++		data->state = I2C_MSPM0_TIMEOUT;
++		DL_I2C_disableInterrupt(config->base, TI_MSPM0_CONTROLLER_INTERRUPTS);
++		DL_I2C_clearInterruptStatus(config->base, TI_MSPM0_CONTROLLER_INTERRUPTS);
++		DL_I2C_flushControllerTXFIFO(config->base);
++		return -ETIMEDOUT;
++	}
+ 
+ 	if (data->state == I2C_MSPM0_TIMEOUT) {
+ 		return -ETIMEDOUT;
+@@ -677,57 +688,71 @@ static inline void i2c_mspm0_isr_controller(const struct device *dev)
+ {
+ 	const struct i2c_mspm0_config *config = dev->config;
+ 	struct i2c_mspm0_data *data = dev->data;
+-
+-	switch (DL_I2C_getPendingInterrupt(config->base)) {
+-	case DL_I2C_IIDX_CONTROLLER_STOP:
+-		if(data->state == I2C_MSPM0_RX_INPROGRESS) {
+-			data->state = I2C_MSPM0_RX_COMPLETE;
++	uint32_t pending;
++
++	while ((pending = DL_I2C_getPendingInterrupt(config->base)) != DL_I2C_IIDX_NO_INT) {
++		switch (pending) {
++		case DL_I2C_IIDX_CONTROLLER_STOP:
++			/* Drain any remaining bytes from RX FIFO */
++			while (DL_I2C_isControllerRXFIFOEmpty(config->base) != true) {
++				if (data->transfer_count < data->transfer_len) {
++					data->msg_buf[data->transfer_count++] =
++						DL_I2C_receiveControllerData(config->base);
++				} else {
++					DL_I2C_receiveControllerData(config->base);
++				}
++			}
++			if (data->state == I2C_MSPM0_RX_INPROGRESS ||
++			    data->state == I2C_MSPM0_RX_STARTED) {
++				data->state = I2C_MSPM0_RX_COMPLETE;
++				k_sem_give(data->device_sync_sem);
++			}
++			break;
++		case DL_I2C_IIDX_CONTROLLER_TX_DONE:
++			DL_I2C_disableInterrupt(config->base, DL_I2C_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER);
++			data->state = I2C_MSPM0_TX_COMPLETE;
+ 			k_sem_give(data->device_sync_sem);
+-		}
+-		break;
+-	case DL_I2C_IIDX_CONTROLLER_TX_DONE:
+-		DL_I2C_disableInterrupt(config->base, DL_I2C_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER);
+-		data->state = I2C_MSPM0_TX_COMPLETE;
+-		k_sem_give(data->device_sync_sem);
+-		break;
+-	case DL_I2C_IIDX_CONTROLLER_RXFIFO_TRIGGER:
+-		/* Receive all bytes from target */
+-		data->state = I2C_MSPM0_RX_INPROGRESS;
+-		while (DL_I2C_isControllerRXFIFOEmpty(config->base) != true) {
+-			if (data->transfer_count < data->transfer_len) {
+-				data->msg_buf[data->transfer_count++] =
++			break;
++		case DL_I2C_IIDX_CONTROLLER_RXFIFO_TRIGGER:
++			/* Receive bytes from target */
++			data->state = I2C_MSPM0_RX_INPROGRESS;
++			while (DL_I2C_isControllerRXFIFOEmpty(config->base) != true) {
++				if (data->transfer_count < data->transfer_len) {
++					data->msg_buf[data->transfer_count++] =
++						DL_I2C_receiveControllerData(config->base);
++				} else {
++					/* Ignore if transaction length exceeded */
+ 					DL_I2C_receiveControllerData(config->base);
+-			} else {
+-				/* Ignore if transaction length exceeded */
+-				DL_I2C_receiveControllerData(config->base);
++				}
+ 			}
+-		}
+-		break;
+-	case DL_I2C_IIDX_CONTROLLER_TXFIFO_TRIGGER:
+-		data->state = I2C_MSPM0_TX_INPROGRESS;
+-		/* Fill TX FIFO with next bytes to send */
+-		if (data->transfer_count < data->transfer_len) {
+-			data->transfer_count += DL_I2C_fillControllerTXFIFO(
+-				config->base, &data->msg_buf[data->transfer_count],
+-				data->transfer_len - data->transfer_count);
+-		}
+-		break;
+-	case DL_I2C_IIDX_CONTROLLER_NACK:
+-		if ((data->state == I2C_MSPM0_RX_STARTED) ||
+-		    (data->state == I2C_MSPM0_TX_STARTED)) {
+-			/* NACK interrupt if I2C Target is disconnected */
++			break;
++		case DL_I2C_IIDX_CONTROLLER_TXFIFO_TRIGGER:
++			data->state = I2C_MSPM0_TX_INPROGRESS;
++			/* Fill TX FIFO with next bytes to send */
++			if (data->transfer_count < data->transfer_len) {
++				data->transfer_count += DL_I2C_fillControllerTXFIFO(
++					config->base, &data->msg_buf[data->transfer_count],
++					data->transfer_len - data->transfer_count);
++			}
++			break;
++		case DL_I2C_IIDX_CONTROLLER_NACK:
++			data->state = I2C_MSPM0_ERROR;
++			k_sem_give(data->device_sync_sem);
++			break;
++		case DL_I2C_IIDX_CONTROLLER_ARBITRATION_LOST:
+ 			data->state = I2C_MSPM0_ERROR;
+ 			k_sem_give(data->device_sync_sem);
++			break;
++		case DL_I2C_IIDX_TIMEOUT_A:
++			data->state = I2C_MSPM0_TIMEOUT;
++			k_sem_give(data->device_sync_sem);
++			DL_I2C_disableInterrupt(config->base, TI_MSPM0_CONTROLLER_INTERRUPTS);
++			DL_I2C_clearInterruptStatus(config->base, TI_MSPM0_CONTROLLER_INTERRUPTS);
++			DL_I2C_flushControllerTXFIFO(config->base);
++			break;
++		default:
++			break;
+ 		}
+-		break;
+-	case DL_I2C_IIDX_TIMEOUT_A:
+-		data->state = I2C_MSPM0_TIMEOUT;
+-		k_sem_give(data->device_sync_sem);
+-		DL_I2C_disableInterrupt(config->base, TI_MSPM0_CONTROLLER_INTERRUPTS);
+-		DL_I2C_clearInterruptStatus(config->base, TI_MSPM0_CONTROLLER_INTERRUPTS);
+-		DL_I2C_flushControllerTXFIFO(config->base);
+-	default:
+-		break;
+ 	}
+ }
+ 
