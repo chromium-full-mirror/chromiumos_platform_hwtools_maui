@@ -160,7 +160,14 @@ static int sbu_mux_init(const struct device *dev)
 {
 	struct sbu_mux_data *data = dev->data;
 
-#if IS_ENABLED(CONFIG_SBU_MUX_TYPE_GPIO)
+#if IS_ENABLED(CONFIG_SBU_MUX_TYPE_PDC)
+	const struct sbu_mux_cfg *cfg = dev->config;
+
+	if (!device_is_ready(cfg->pdc)) {
+		LOG_WRN("PDC device not ready; disabling SBU mux polling");
+		return 0;
+	}
+#elif IS_ENABLED(CONFIG_SBU_MUX_TYPE_GPIO)
 	const struct sbu_mux_cfg *cfg = dev->config;
 	int rv;
 

@@ -23,10 +23,25 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     python3 \
     python3-pip \
+    python3-venv \
     python3-serial \
     python3-requests \
     python3-usb \
     && rm -rf /var/lib/apt/lists/*
+
+# Install the pinned Python tooling into a venv rather than over the top of the
+# system interpreter: our pins are newer than some of Debian's own packages
+# (e.g. idna), and pip cannot replace a dpkg-installed package. Inheriting
+# system site-packages keeps apt's python3-serial/requests/usb visible to the
+# maui tools while the venv takes precedence for everything we pin ourselves.
+RUN python3 -m venv --system-site-packages /venv
+ENV PATH="/venv/bin:${PATH}"
+
+# Fully pinned and hashed (pip-compile --generate-hashes) so image builds are
+# reproducible. Regenerate with:
+#   pip-compile --generate-hashes dockerfiles/requirements.utils.in
+COPY dockerfiles/requirements.utils.in dockerfiles/requirements.utils.compiled ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.utils.compiled
 
 # Install Rust using rustup
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y

@@ -1,0 +1,41 @@
+/* Copyright 2026 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+/ {
+	chosen {
+		zephyr,code-partition = &ro_boot_partition;
+		zephyr,console = &cdc_acm_uart0;
+		zephyr,shell-uart = &cdc_acm_uart0;
+	};
+};
+
+/*
+ * For RO Bootloader, slot0_partition ("image-0") points to the RW Bootloader
+ * (0x18000, 128 KB) so that RO validates and chainloads RW Bootloader.
+ *
+ * slot1_partition ("image-1") points to Main App (0x38000, 768 KB). It exists
+ * only so that RO's flash map covers the App region; RO must NOT boot it, and
+ * boot_find_next_slot_hook() pins RO to slot 0 to enforce that. RO Serial
+ * Recovery can only write slot 0 (the RW Bootloader) -- `smpmgr --slot N` sets
+ * the SMP image number, not the MCUboot slot, and with a single updatable
+ * image only `--slot 0` is valid. A broken App is repaired in two steps:
+ * RO reflashes RW, then RW Serial Recovery reflashes the App.
+ */
+&flash0 {
+	partitions {
+		/delete-node/ partition@18000;
+		/delete-node/ partition@38000;
+
+		slot0_partition: partition@18000 {
+			label = "image-0";
+			reg = <0x00018000 DT_SIZE_K(128)>;
+		};
+
+		slot1_partition: partition@38000 {
+			label = "image-1";
+			reg = <0x00038000 DT_SIZE_K(768)>;
+		};
+	};
+};

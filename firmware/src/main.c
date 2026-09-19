@@ -7,6 +7,13 @@
 #include "led.h"
 #include "usb_init.h"
 
+#ifdef CONFIG_MAUI_HEALTH
+#include "health.h"
+#endif
+#ifdef CONFIG_MAUI_NVS_STORAGE
+#include "nvs_storage.h"
+#endif
+
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
@@ -23,26 +30,37 @@ int main(void)
 
 	LOG_INF("Maui Firmware Starting");
 
+#ifdef CONFIG_MAUI_NVS_STORAGE
+	(void)nvs_storage_init();
+#endif
+#ifdef CONFIG_MAUI_HEALTH
+	(void)health_init();
+#endif
+
 	ret = leds_init();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize LEDs (err %d)", ret);
 		led_set_state(LED_GREEN, LED_STATE_SYS_ERROR);
-		return 0;
 	}
 
 	ret = adcs_init();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize ADCs (err %d)", ret);
 		led_set_state(LED_GREEN, LED_STATE_SYS_ERROR);
-		return 0;
 	}
 
 	ret = init_usb();
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize USB (err %d)", ret);
 		led_set_state(LED_GREEN, LED_STATE_SYS_ERROR);
-		return 0;
 	}
 
+	LOG_INF("Maui Firmware Initialized Successfully");
+
+	/*
+	 * Nothing further to do on this thread. Everything runs from its own
+	 * thread or workqueue from here, and Zephyr is happy for main() to
+	 * return.
+	 */
 	return 0;
 }

@@ -1,0 +1,101 @@
+/* Copyright 2026 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+
+&adc0 {
+	status = "okay";
+	pinctrl-0 = <&adc0_ch0_gpi0_default
+		     &adc0_ch1_gpi1_default
+		     &adc0_ch2_gpi2_default
+		     &adc0_ch3_gpi3_default
+		     &adc0_ch4_gpi4_default
+		     &adc0_ch5_gpi5_default
+		     &adc0_ch6_gpi6_default
+		     &adc0_ch7_gpi7_default>;
+	pinctrl-names = "default";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* CH0 (Pin G10, GPI0): EC_ADC_PPVAR_USB_DUT_VBUS */
+	adc_ppvar_usb_dut_vbus: channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3000>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <10>;
+	};
+
+	/* CH1 (Pin G13, GPI1): EC_ADC_SBU1_DET */
+	adc_sbu1_det: channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3000>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <10>;
+	};
+
+	/* CH2 (Pin G12, GPI2): EC_ADC_SBU2_DET */
+	adc_sbu2_det: channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3000>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <10>;
+	};
+
+	/* CH3 (Pin F9, GPI3): EC_ADC_USB_HOST_CC1 */
+	adc_usb_host_cc1: channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3000>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <10>;
+	};
+
+	/* CH4 (Pin F13, GPI4): EC_ADC_USB_HOST_CC2 */
+	adc_usb_host_cc2: channel@4 {
+		reg = <4>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3000>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <10>;
+	};
+
+	/* CH5 (Pin F10, GPI5): EC_ADC_PP5000_USB_HOST_VBUS */
+	adc_pp5000_usb_host_vbus: channel@5 {
+		reg = <5>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3000>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <10>;
+	};
+
+	/* CH6 (Pin F12, GPI6): EC_ADC_PP5000 */
+	adc_pp5000: channel@6 {
+		reg = <6>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3000>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <10>;
+	};
+
+	/* CH7 (Pin E13, GPI7): EC_ADC_PPVAR_USB_CHRG_VBUS */
+	adc_ppvar_usb_chg_vbus: channel@7 {
+		reg = <7>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3000>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <10>;
+	};
+};

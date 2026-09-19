@@ -20,8 +20,7 @@ cscope.out
 cscope.po.out
 .coverage
 coverage.lcov
-/firmware/build
-/firmware/build_docker
+/firmware/build*
 /firmware/twister-out*
 /firmware/tests/twister_outputs/*
 /firmware/src/app_version.h
@@ -29,3 +28,5 @@ coverage.lcov
 # Ignore tags for those using TAGS
 TAGS
 tools/maui_libs/version.py
+.vscode/
+firmware/*.bin

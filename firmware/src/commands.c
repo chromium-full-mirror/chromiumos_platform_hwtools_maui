@@ -11,6 +11,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef CONFIG_MAUI_HEALTH
+#include "health.h"
+#endif
+#ifdef CONFIG_MAUI_NVS_STORAGE
+#include "nvs_storage.h"
+#endif
+
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
@@ -18,7 +25,10 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/reboot.h>
 
+#if defined(CONFIG_SOC_FAMILY_TI_MSPM0) || defined(CONFIG_SOC_MSPM0G3507) || \
+	defined(CONFIG_SOC_MSPM0G5117)
 #include <ti/driverlib/m0p/dl_sysctl.h>
+#endif
 
 #if DT_HAS_COMPAT_STATUS_OKAY(ti_tps6699x)
 /**
@@ -130,7 +140,7 @@ static int cmd_data_dut_handler(const struct shell *sh, size_t argc,
 }
 
 /**
- * Handles the command that jumps from main code to BSL.
+ * Handles the command that jumps from main code to BSL / Bootloader.
  */
 static int cmd_jump_to_bsl_handler(const struct shell *sh, size_t argc,
 				   char **argv)
@@ -138,6 +148,8 @@ static int cmd_jump_to_bsl_handler(const struct shell *sh, size_t argc,
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
+#if defined(CONFIG_SOC_FAMILY_TI_MSPM0) || defined(CONFIG_SOC_MSPM0G3507) || \
+	defined(CONFIG_SOC_MSPM0G5117)
 	shell_print(sh, "Going into BSL mode");
 
 	/* Erase SRAM completely before jumping to BSL */
@@ -178,36 +190,126 @@ static int cmd_jump_to_bsl_handler(const struct shell *sh, size_t argc,
 				    SYSCTL_RESETCMD_GO_TRUE)
 		: "r1", "r2", "r3", "r4");
 	return 0;
+#else
+	shell_print(sh, "Rebooting into RW MCUboot Bootloader...");
+	k_msleep(50);
+	return health_reboot_to(BOOT_TARGET_FORCE_RW_RECOVERY);
+#endif
 }
 
 /**
- * Handles the version command which prints the Dolos firmware version
+ * Handles the version command which prints the firmware version
  */
 static int cmd_version_handler(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-	shell_print(sh, "Maui version %s", APP_VERSION_STRING);
+	/*
+	 * CONFIG_FLASH_LOAD_OFFSET is the offset of whichever partition this
+	 * image was linked into (0 standalone, slot0 under MCUboot), and
+	 * CONFIG_ROM_START_OFFSET covers the MCUboot image header. Deriving the
+	 * address keeps this honest if the partition table ever moves.
+	 */
+	const unsigned long run_addr = DT_REG_ADDR(DT_CHOSEN(zephyr_flash)) +
+				       CONFIG_FLASH_LOAD_OFFSET +
+				       CONFIG_ROM_START_OFFSET;
+#if IS_ENABLED(CONFIG_BOOTLOADER_MCUBOOT)
+	const char *mode = "MCUBOOT-SLOT0";
+#else
+	const char *mode = "STANDALONE";
+#endif
+
+	shell_print(sh, "Maui version %s [%s (0x%08lx)]", APP_VERSION_STRING,
+		    mode, run_addr);
 
 	return 0;
+}
+
+static int cmd_reboot_handler(const struct shell *sh, size_t argc, char **argv)
+{
+#ifdef CONFIG_MAUI_HEALTH
+	/*
+	 * Only boards with the 3-stage bootloader chain can be steered to a
+	 * particular stage; elsewhere every form of this command is a plain
+	 * cold reboot.
+	 */
+	if (argc > 1) {
+		if (strcmp(argv[1], "bootloader") == 0) {
+			shell_print(sh,
+				    "Rebooting into RW MCUboot Bootloader...");
+			k_msleep(50);
+			return health_reboot_to(BOOT_TARGET_FORCE_RW_RECOVERY);
+		} else if (strcmp(argv[1], "ro-bootloader") == 0 ||
+			   strcmp(argv[1], "ro") == 0) {
+			shell_print(sh,
+				    "Rebooting into RO Recovery Bootloader...");
+			k_msleep(50);
+			return health_reboot_to(BOOT_TARGET_FORCE_RO);
+		}
+	}
+
+	shell_print(sh, "Resetting device...\n");
+	k_msleep(50);
+	return health_reboot_to(BOOT_TARGET_NORMAL);
+#else
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "Resetting device...\n");
+	k_msleep(50);
+	sys_reboot(SYS_REBOOT_COLD);
+
+	return 0;
+#endif
 }
 
 static int cmd_reset_handler(const struct shell *shell, size_t argc,
 			     char **argv)
 {
+	return cmd_reboot_handler(shell, argc, argv);
+}
+
+#ifdef CONFIG_MAUI_NVS_STORAGE
+static int cmd_serial_get_handler(const struct shell *sh, size_t argc,
+				  char **argv)
+{
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
+	char sn[NVS_SERIAL_MAX_LEN] = { 0 };
+	int rc;
 
-	shell_print(shell, "Resetting device...\n");
+	rc = nvs_storage_get_serial(sn, sizeof(sn));
+	if (rc) {
+		shell_error(sh, "Failed to read serial number (%d)", rc);
+		return rc;
+	}
 
-	// Delay to ensure the message is printed
-	k_sleep(K_SECONDS(1));
-
-	sys_reboot(SYS_REBOOT_COLD);
-
+	shell_print(sh, "Serial Number: %s", sn);
 	return 0;
 }
+
+static int cmd_serial_set_handler(const struct shell *sh, size_t argc,
+				  char **argv)
+{
+	if (argc < 2) {
+		shell_error(sh, "Usage: serial set <SERIAL_NUMBER>");
+		return -EINVAL;
+	}
+
+	int rc = nvs_storage_set_serial(argv[1]);
+	if (rc) {
+		shell_error(sh, "Failed to set serial number: %d", rc);
+		return rc;
+	}
+
+	shell_print(
+		sh,
+		"Serial Number updated to: %s (reboot required for USB descriptor update)",
+		argv[1]);
+	return 0;
+}
+#endif /* CONFIG_MAUI_NVS_STORAGE */
 
 static int cmd_log_exclusive_handler(const struct shell *sh, size_t argc,
 				     char **argv)
@@ -279,10 +381,28 @@ static int cmd_log_exclusive_handler(const struct shell *sh, size_t argc,
 	return 0;
 }
 
+#ifdef CONFIG_MAUI_NVS_STORAGE
+SHELL_STATIC_SUBCMD_SET_CREATE(
+	sub_serial,
+	SHELL_CMD(get, NULL, "Get persistent serial number",
+		  cmd_serial_get_handler),
+	SHELL_CMD_ARG(set, NULL, "Set persistent serial number <SERIAL_NUMBER>",
+		      cmd_serial_set_handler, 2, 0),
+	SHELL_SUBCMD_SET_END);
+#endif
+
 SHELL_CMD_REGISTER(reset, NULL, "Reset the device", cmd_reset_handler);
+SHELL_CMD_ARG_REGISTER(reboot, NULL,
+		       "Reboot the device [bootloader|ro-bootloader]",
+		       cmd_reboot_handler, 1, 1);
 SHELL_CMD_REGISTER(version, NULL, "Prints firmware version",
 		   cmd_version_handler);
-SHELL_CMD_REGISTER(bsl, NULL, "Invokes BSL", cmd_jump_to_bsl_handler);
+#ifdef CONFIG_MAUI_NVS_STORAGE
+SHELL_CMD_REGISTER(serial, &sub_serial, "Manage persistent serial number",
+		   NULL);
+#endif
+SHELL_CMD_REGISTER(bsl, NULL, "Invokes BSL / Bootloader",
+		   cmd_jump_to_bsl_handler);
 SHELL_CMD_ARG_REGISTER(
 	log_exclusive, NULL,
 	"Log only specific modules, reset all, or show status.\n"

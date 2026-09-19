@@ -5,7 +5,9 @@
 cmake_minimum_required(VERSION 3.20.0)
 
 list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
-set(BOARD maui_proto_3507)
+if(NOT DEFINED BOARD)
+	set(BOARD maui_proto_3507)
+endif()
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(maui)
@@ -15,7 +17,6 @@ if(BOARD STREQUAL "maui_proto_5117")
 	zephyr_compile_definitions(IOMUX_PINCM60=IOMUX_PINCM59)
 endif()
 
-
 if(CONFIG_ADC_MSPM0_ADC12_WIP)
 	target_sources(app PRIVATE drivers/adc_mspm0_adc12_wip.c)
 endif()
@@ -24,13 +25,26 @@ if(CONFIG_ADC)
 	target_sources(app PRIVATE src/adc.c)
 endif()
 
+# IT82002-only subsystems: BBRAM-backed boot health and the NVS key-value
+# store. Gated so the MSPM0 boards, which have neither, do not build them.
+if(CONFIG_MAUI_HEALTH)
+	target_sources(app PRIVATE src/health.c)
+endif()
+
+if(CONFIG_MAUI_NVS_STORAGE)
+	target_sources(app PRIVATE src/nvs_storage.c)
+endif()
+
+if(CONFIG_MAUI_HOST_MUX)
+	target_sources(app PRIVATE src/host_mux.c)
+endif()
 
 target_sources(app PRIVATE
 	src/bypass.c
 	src/commands.c
 	src/gpio.c
 	src/gpio_shell.c
-	src/host_mux.c
+	src/h2h_flash.c
 	src/hwrev.c
 	src/led.c
 	src/main.c

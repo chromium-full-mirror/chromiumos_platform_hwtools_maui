@@ -60,7 +60,7 @@ git push origin HEAD:refs/for/main
 
 ## Supported Hardware Targets
 
-Maui supports two prototype MCU hardware variants:
+Maui supports three prototype MCU hardware variants:
 
 *   **`maui_proto_3507` (Default)**:
     *   **MCU**: TI MSPM0G3507
@@ -68,6 +68,10 @@ Maui supports two prototype MCU hardware variants:
 *   **`maui_proto_5117`**:
     *   **MCU**: TI MSPM0G5117
     *   **Features**: Uses the native on-chip USB hardware controller with Zephyr USB Next stack. The shell/console operates directly over USB CDC ACM (`/dev/ttyACM*`), and flashing uses native USB DFU mode (`--usb`).
+*   **`maui_v1p2_it82002`**:
+    *   **MCU**: ITE IT82002AW (RISC-V), 1 MB flash
+    *   **Features**: Three-stage boot chain (RO bootloader -> RW bootloader -> App) with hardware flash write-protection of both bootloaders. Shell over native USB CDC ACM, firmware updates via MCUboot serial recovery (`smpmgr`).
+    *   See [firmware/boards/maui_v1p2_it82002/README.md](firmware/boards/maui_v1p2_it82002/README.md) for the boot flow, flash layout, memory protection and flashing procedures.
 
 ## Build firmware using Docker
 
@@ -102,6 +106,29 @@ docker run --rm -v $(pwd):/repo maui-builder-5117:latest -b maui_proto_5117 -p
 This will generate a text-format firmware file in:
 `firmware/build_docker/zephyr/zephyr.txt`
 This file can be used to flash Maui using BSL or DFU.
+
+### 3. Building for `maui_v1p2_it82002`
+Build the Docker builder image for **`maui_v1p2_it82002`**:
+
+```shell
+docker build -t maui-builder-it82002 --build-arg BOARD=it82002 -f dockerfiles/Dockerfile.fw_builder .
+```
+
+Compile the **`maui_v1p2_it82002`** firmware (RO bootloader, RW bootloader,
+application, and the combined 1 MB flash image):
+
+```shell
+docker run --rm -v "$(pwd)":/repo -w /repo/firmware \
+  --entrypoint bash maui-builder-it82002 \
+  -c './bootloader/mcuboot/build_bootloaders.sh'
+```
+
+Note that `--entrypoint bash` is required: the image's default entrypoint builds
+only the standalone single-image application and does not produce the
+bootloaders or the combined image.
+
+See [firmware/boards/maui_v1p2_it82002/README.md](firmware/boards/maui_v1p2_it82002/README.md)
+for the resulting artifacts and how to flash them.
 
 ## Unit Testing
 

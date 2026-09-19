@@ -5,12 +5,21 @@
 
 #include "adc.h"
 
+#include <errno.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/adc.h>
+#include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 
+#if defined(CONFIG_SOC_FAMILY_TI_MSPM0) || defined(CONFIG_SOC_MSPM0G3507) || \
+	defined(CONFIG_SOC_MSPM0G5117)
 #include <m0p/dl_factoryregion.h>
+#endif
 
 // Datasheet for the family specifies this as <-2.1, -1.7>, with
 // typical -1.8 mV/'C
@@ -37,9 +46,12 @@
 
 LOG_MODULE_REGISTER(adc);
 
-#define DT_ADC_NODE_FROM_NODELABEL(node)                  \
-	ADC_DT_SPEC_STRUCT(DT_PARENT(DT_NODELABEL(node)), \
-			   DT_PROP_BY_IDX(DT_NODELABEL(node), reg, 0))
+#define DT_ADC_NODE_FROM_NODELABEL(node)                                   \
+	COND_CODE_1(DT_NODE_EXISTS(DT_NODELABEL(node)),                    \
+		    (ADC_DT_SPEC_STRUCT(DT_PARENT(DT_NODELABEL(node)),     \
+					DT_PROP_BY_IDX(DT_NODELABEL(node), \
+						       reg, 0))),          \
+		    ({ 0 }))
 
 static const struct adc_dt_spec adc_channels[] = {
 	[ADC_CH_USB_HOST_CC1] = DT_ADC_NODE_FROM_NODELABEL(adc_usb_host_cc1),
@@ -57,7 +69,19 @@ static const struct adc_dt_spec adc_channels[] = {
 	[ADC_CH_PP5000] = DT_ADC_NODE_FROM_NODELABEL(adc_pp5000),
 };
 
-char *adc_channel_to_str(enum adc_type ch)
+/*
+ * A channel is "present" only if the board's adc.dtsi declares a node for it.
+ * DT_ADC_NODE_FROM_NODELABEL() expands to {0} when it does not, leaving a NULL
+ * device. Boards intentionally populate different subsets of enum adc_type:
+ * the IT82002 has no BSL strap and measures temperature over I2C, so it wires
+ * up 8 of the 10 logical channels.
+ */
+static bool adc_ch_present(enum adc_type ch)
+{
+	return ch < ADC_CH_COUNT && adc_channels[ch].dev != NULL;
+}
+
+static const char *adc_channel_name(enum adc_type ch)
 {
 	switch (ch) {
 	case ADC_CH_USB_HOST_CC1:
@@ -85,34 +109,42 @@ char *adc_channel_to_str(enum adc_type ch)
 	}
 }
 
-int adcs_init()
+int adcs_init(void)
 {
+	unsigned int present = 0;
+	unsigned int ready = 0;
 	int err;
 
-	for (unsigned a = 0; a < ADC_CH_COUNT; a++) {
-		if (!adc_channels[a].dev) {
-			LOG_ERR("Skipping channel %s", adc_channel_to_str(a));
+	for (unsigned int a = 0; a < ADC_CH_COUNT; a++) {
+		if (!adc_ch_present(a)) {
+			/* Expected on boards that do not wire this signal. */
+			LOG_DBG("Channel %s not present on this board",
+				adc_channel_name(a));
 			continue;
 		}
+		present++;
 
-		LOG_DBG("Initializing ADC channel %s", adc_channel_to_str(a));
+		LOG_DBG("Initializing ADC channel %s", adc_channel_name(a));
 
 		if (!adc_is_ready_dt(&adc_channels[a])) {
 			LOG_ERR("ADC controller for channel %s is not ready",
-				adc_channel_to_str(a));
+				adc_channel_name(a));
 			continue;
 		}
 
 		err = adc_channel_setup_dt(&adc_channels[a]);
 		if (err < 0) {
 			LOG_ERR("Could not setup channel %s (%d)",
-				adc_channel_to_str(a), err);
+				adc_channel_name(a), err);
 			continue;
 		}
+		ready++;
 	}
 
-	LOG_INF("Initialized ADC channels");
-	return 0;
+	LOG_INF("Initialized %u/%u ADC channels", ready, present);
+
+	/* Only channels this board actually declares count as failures. */
+	return (ready == present) ? 0 : -EIO;
 }
 
 int adc_ch_read(enum adc_type ch)
@@ -120,6 +152,10 @@ int adc_ch_read(enum adc_type ch)
 	int err;
 	uint16_t buf;
 	int32_t val_mv;
+
+	if (!adc_ch_present(ch)) {
+		return -ENOTSUP;
+	}
 
 	struct adc_sequence sequence = {
 		.buffer = &buf,
@@ -129,14 +165,14 @@ int adc_ch_read(enum adc_type ch)
 	err = adc_sequence_init_dt(&adc_channels[ch], &sequence);
 	if (err < 0) {
 		LOG_ERR("Couldn't initialize sequence for ADC channel: %s",
-			adc_channel_to_str(ch));
+			adc_channel_name(ch));
 		return err;
 	}
 
 	err = adc_read_dt(&adc_channels[ch], &sequence);
 	if (err < 0) {
 		LOG_ERR("Couldn't read value of ADC channel: %s",
-			adc_channel_to_str(ch));
+			adc_channel_name(ch));
 		return err;
 	}
 
@@ -144,7 +180,7 @@ int adc_ch_read(enum adc_type ch)
 	err = adc_raw_to_millivolts_dt(&adc_channels[ch], &val_mv);
 	if (err < 0) {
 		LOG_ERR("Couldn't convert value of ADC channel: %s",
-			adc_channel_to_str(ch));
+			adc_channel_name(ch));
 		return err;
 	}
 
@@ -153,12 +189,25 @@ int adc_ch_read(enum adc_type ch)
 
 static int cmd_status(const struct shell *sh, size_t argc, char **argv)
 {
-	int mv;
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
 
 	shell_print(sh, "ADC values:");
-	for (unsigned a = 0; a < ADC_CH_COUNT; a++) {
+	for (unsigned int a = 0; a < ADC_CH_COUNT; a++) {
+		int mv;
+
+		if (!adc_ch_present(a)) {
+			continue;
+		}
+
 		mv = adc_ch_read(a);
-		shell_print(sh, "[%20s] =% 5d mV", adc_channel_to_str(a), mv);
+		if (mv < 0) {
+			shell_print(sh, "[%20s] = error (%d)",
+				    adc_channel_name(a), mv);
+		} else {
+			shell_print(sh, "[%20s] =% 5d mV", adc_channel_name(a),
+				    mv);
+		}
 	}
 
 	return 0;
@@ -169,29 +218,72 @@ static int cmd_read(const struct shell *sh, size_t argc, char **argv)
 	if (argc != 2) {
 		shell_print(sh, "Usage: adc read <channel_name>");
 		shell_print(sh, "Available channels:");
-		for (unsigned a = 0; a < ADC_CH_COUNT; a++) {
-			shell_print(sh, "- %s", adc_channel_to_str(a));
+		for (unsigned int a = 0; a < ADC_CH_COUNT; a++) {
+			if (adc_ch_present(a)) {
+				shell_print(sh, "- %s", adc_channel_name(a));
+			}
 		}
 
 		return -EINVAL;
 	}
 
-	for (unsigned a = 0; a < ADC_CH_COUNT; a++) {
-		if (strcmp(adc_channel_to_str(a), argv[1]))
-			continue;
+	for (unsigned int a = 0; a < ADC_CH_COUNT; a++) {
+		int mv;
 
-		shell_print(sh, "[%s] = %d mV", adc_channel_to_str(a),
-			    adc_ch_read(a));
+		if (!adc_ch_present(a) ||
+		    strcmp(adc_channel_name(a), argv[1]) != 0) {
+			continue;
+		}
+
+		mv = adc_ch_read(a);
+		if (mv < 0) {
+			shell_error(sh, "Failed to read %s (%d)",
+				    adc_channel_name(a), mv);
+			return mv;
+		}
+
+		shell_print(sh, "[%s] = %d mV", adc_channel_name(a), mv);
 
 		return 0;
 	}
 
-	shell_print(sh, "Invalid channel name");
+	shell_error(sh, "Unknown channel '%s' (not available on this board)",
+		    argv[1]);
 	return -EINVAL;
 }
 
 static int cmd_temp(const struct shell *sh, size_t argc, char **argv)
 {
+#if DT_HAS_ALIAS(temp_sensor) && IS_ENABLED(CONFIG_SENSOR)
+	const struct device *dev = DEVICE_DT_GET(DT_ALIAS(temp_sensor));
+	struct sensor_value val;
+	int rc;
+
+	if (!device_is_ready(dev)) {
+		shell_error(sh, "Temperature sensor device %s is not ready",
+			    dev->name);
+		return -ENODEV;
+	}
+
+	rc = sensor_sample_fetch(dev);
+	if (rc < 0) {
+		shell_error(sh, "Failed to fetch sample from %s (%d)",
+			    dev->name, rc);
+		return rc;
+	}
+
+	rc = sensor_channel_get(dev, SENSOR_CHAN_AMBIENT_TEMP, &val);
+	if (rc < 0) {
+		shell_error(sh, "Failed to get ambient temp from %s (%d)",
+			    dev->name, rc);
+		return rc;
+	}
+
+	shell_print(sh, "Temperature = %d.%02d 'C", val.val1,
+		    abs(val.val2) / 10000);
+	return 0;
+#elif defined(CONFIG_SOC_FAMILY_TI_MSPM0) || defined(CONFIG_SOC_MSPM0G3507) || \
+	defined(CONFIG_SOC_MSPM0G5117)
 	int mv = adc_ch_read(ADC_CH_TEMP_SENSOR);
 	int sense0 = DL_FactoryRegion_getTemperatureVoltage();
 
@@ -210,8 +302,11 @@ static int cmd_temp(const struct shell *sh, size_t argc, char **argv)
 
 	shell_print(sh, "Temperature = %d.%02d 'C", temp / 100, temp % 100);
 #endif
-
 	return 0;
+#else
+	shell_error(sh, "No temperature sensor configured");
+	return -ENOTSUP;
+#endif
 }
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_adc_cmds,

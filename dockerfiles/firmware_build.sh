@@ -24,7 +24,13 @@ chmod +x ./version.sh
 ./version.sh
 if [ "$#" -eq 0 ]; then
 	west build -b maui_proto_3507 -d build_docker
+	python3 /usr/local/bin/converter.py /repo/firmware/build_docker/zephyr/zephyr.bin /repo/firmware/build_docker/zephyr/zephyr.txt
+elif [[ "$*" == *"maui_v1p2_it82002"* ]] || [[ "$*" == *"it82002"* ]]; then
+	chmod +x /repo/firmware/bootloader/mcuboot/build_bootloaders.sh
+	/repo/firmware/bootloader/mcuboot/build_bootloaders.sh
 else
 	west build -d build_docker "$@"
+	if [ -f /repo/firmware/build_docker/zephyr/zephyr.bin ]; then
+		python3 /usr/local/bin/converter.py /repo/firmware/build_docker/zephyr/zephyr.bin /repo/firmware/build_docker/zephyr/zephyr.txt || true
+	fi
 fi
-python3 /usr/local/bin/converter.py /repo/firmware/build_docker/zephyr/zephyr.bin /repo/firmware/build_docker/zephyr/zephyr.txt

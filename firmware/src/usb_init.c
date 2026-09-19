@@ -3,7 +3,10 @@
  * found in the LICENSE file.
  */
 
+#include "nvs_storage.h"
 #include "usb_init.h"
+
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
@@ -14,44 +17,52 @@ LOG_MODULE_REGISTER(usb_init, LOG_LEVEL_INF);
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT)
 #include <zephyr/usb/usbd.h>
 
-/* Hardcoded USB Properties */
+/* USB VID/PID per Maui IT82002 Design Doc MAUI-FW-COM-4 (0x18D1:0x5085) */
 #define USB_VID_GOOGLE 0x18D1
 #define USB_PID_MAUI 0x5085
-/* TODO(b/535538021): Store persistent serial number in non-volatile flash and
- * read it at init during USB descriptor configuration.
- */
-#define CUSTOM_SERIAL_STR "Uninitialized"
 
-/* Instantiate the macro context pointing to your controller */
+/* Global buffer holding persistent serial number read from NVS */
+static char serial_str[NVS_SERIAL_MAX_LEN] = NVS_DEFAULT_SERIAL;
+
+/* Instantiate USB device context */
 USBD_DEVICE_DEFINE(sample_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)),
 		   USB_VID_GOOGLE, USB_PID_MAUI);
 
 USBD_DESC_LANG_DEFINE(sample_lang);
 USBD_DESC_MANUFACTURER_DEFINE(sample_mfr, "Google LLC");
-USBD_DESC_PRODUCT_DEFINE(sample_product, "Maui Interface");
+USBD_DESC_PRODUCT_DEFINE(sample_product, "Maui Diagnostic Controller");
 
-/*
- * Use the generic descriptor macro to declare the serial string.
- * This automatically adapts to the underlying Zephyr struct design.
- */
-USBD_DESC_STRING_DEFINE(sample_sn, CUSTOM_SERIAL_STR,
-			USBD_DUT_STRING_SERIAL_NUMBER);
+static struct usbd_desc_node sample_sn = {
+	.str = {
+		.utype = USBD_DUT_STRING_SERIAL_NUMBER,
+		.ascii7 = true,
+	},
+	.ptr = serial_str,
+	.bLength = 2 + (sizeof(NVS_DEFAULT_SERIAL) - 1) * 2,
+	.bDescriptorType = USB_DESC_STRING,
+};
 
 USBD_DESC_CONFIG_DEFINE(fs_cfg_desc, "FS Configuration");
-USBD_CONFIGURATION_DEFINE(sample_fs_config, 0, 125, &fs_cfg_desc); /* Default
-								      250mA max
-								      power */
+USBD_CONFIGURATION_DEFINE(sample_fs_config, 0, 125, &fs_cfg_desc);
 
 int init_usb(void)
 {
 	int ret;
 
-	/* Setup standard descriptors into the device next-gen context */
+#ifdef CONFIG_MAUI_NVS_STORAGE
+	/* Read persistent serial number from NVS before descriptor
+	 * registration. Boards without NVS keep the NVS_DEFAULT_SERIAL compiled
+	 * in above.
+	 */
+	(void)nvs_storage_init();
+	(void)nvs_storage_get_serial(serial_str, sizeof(serial_str));
+#endif
+	sample_sn.bLength = 2 + strlen(serial_str) * 2;
+	LOG_INF("USB Device Serial Number: %s", serial_str);
+
 	usbd_add_descriptor(&sample_usbd, &sample_lang);
 	usbd_add_descriptor(&sample_usbd, &sample_mfr);
 	usbd_add_descriptor(&sample_usbd, &sample_product);
-
-	/* Inject our macro-built serial number pointer */
 	ret = usbd_add_descriptor(&sample_usbd, &sample_sn);
 	if (ret) {
 		LOG_ERR("Failed to append custom serial descriptor (%d)", ret);
@@ -74,8 +85,8 @@ int init_usb(void)
 		return ret;
 	}
 
-	/* Wait 250ms after UDC init to ensure host registers a physical USB
-	 * disconnect on warm reboots */
+	/* Wait 250ms after UDC init to ensure host registers disconnect on warm
+	 * reboots */
 	k_msleep(250);
 
 	ret = usbd_enable(&sample_usbd);

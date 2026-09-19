@@ -1,0 +1,454 @@
+/* Copyright 2026 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+/dts-v1/;
+
+#include <ite/it82xx2.dtsi>
+#include <ite/it8xxx2-pinctrl-map.dtsi>
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+#include "adc.dtsi"
+#include "../common/gpio_ext.h"
+
+/ {
+	model = "Maui v1.2 (ITE IT82002)";
+	compatible = "google,maui-v1p2-it82002", "ite,it82002";
+
+	aliases {
+		zephyr-udc0 = &usb0;
+		/* pdc-debug-uart = &uart2; see the UART2 block near the end */
+		temp-sensor = &board_temp_sensor;
+	};
+
+	chosen {
+		zephyr,console = &cdc_acm_uart0;
+		zephyr,shell-uart = &cdc_acm_uart0;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		/*
+		 * MCUboot's flash_map_extended.c derives FLASH_DEVICE_ID and
+		 * FLASH_DEVICE_BASE from this chosen node. Without it the
+		 * bootloaders fail to build ("FLASH_DEVICE_ID could not be
+		 * determined") on MCUboot revisions that have no
+		 * zephyr,flash-only fallback.
+		 */
+		zephyr,flash-controller = &flashctrl;
+	};
+
+	leds: leds {
+		compatible = "gpio-leds";
+
+		ec_led_green: ec_led_green {
+			/* Pin B10: PS2DAT1/RTS0#/GPF3 -> EC_LED_GREEN */
+			gpios = <&gpiof 3 GPIO_ACTIVE_HIGH>;
+			label = "User LED Green";
+		};
+
+		ec_led_amber: ec_led_amber {
+			/* Pin A13: SMCLK5/GPE1 -> EC_LED_AMBER */
+			gpios = <&gpioe 1 GPIO_ACTIVE_HIGH>;
+			label = "User LED Amber";
+		};
+	};
+
+	hwrev {
+		compatible = "google,maui-hwrev";
+		/*
+		 * hwrev_init() shifts left as it walks this list, so the FIRST
+		 * entry becomes the MSB and the LAST becomes the LSB:
+		 *   A9 GPH3 EC_HWREV_ID3 -> bit 2
+		 *   K6 GPA4 EC_HWREV_ID2 -> bit 1
+		 *   N6 GPA3 EC_HWREV_ID1 -> bit 0
+		 */
+		gpios = <&gpioh 3 GPIO_ACTIVE_HIGH>,
+			<&gpioa 4 GPIO_ACTIVE_HIGH>,
+			<&gpioa 3 GPIO_ACTIVE_HIGH>;
+	};
+
+	dut_sbu_mux: dut-sbu-mux {
+		compatible = "google,maui-sbu-mux";
+		status = "okay";
+
+		pdc = <&pdc>;
+	};
+
+	gpios {
+		compatible = "google,maui-gpios";
+
+		/* ==================== Digital Outputs ==================== */
+
+		h2h_reset: h2h_reset_l {
+			/* Pin M6: PWM2/GPA2 -> H2H_RESET_L (Prolific PL27A1 Reset) */
+			gpios = <&gpioa 2 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		hub_reset: hub_reset_l {
+			/* Pin C13: DAC1/TACH1B/GPJ3 -> HUB_RESET_L */
+			gpios = <&gpioj 3 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		pp5000_cutoff: pp5000_cutoff {
+			/* Pin B4: PWRSW/GPE4 -> PP5000_CUTOFF */
+			gpios = <&gpioe 4 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		/* Prolific PL27A1 H2H SPI Flash Mux & Protection Control */
+		ec_mem_sel: ec_mem_sel {
+			/* Pin C2: GPC4 -> EC_MEM_SEL (0 = PL27A1, 1 = EC SPI) */
+			gpios = <&gpioc 4 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		ec_mem_oe_l: ec_mem_oe_l {
+			/*
+			 * Pin K2: ESCK/LPCCLK/GPM4 -> EC_MEM_OE_L (Active Low
+			 * Output Enable). Boots ASSERTED so the mux buffer is
+			 * enabled: ec_mem_sel boots 0 (PL27A1 owns the flash),
+			 * and with OE disabled the PL27A1 could not reach its
+			 * own SPI NOR.
+			 */
+			gpios = <&gpiom 4 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		spi_ec_wp_mem_r_l: spi_ec_wp_mem_r_l {
+			/* Pin B9: PS2DAT2/GPF5 -> SPI_EC_WP_MEM_R_L */
+			gpios = <&gpiof 5 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		spi_ec_hold_mem_r_l: spi_ec_hold_mem_r_l {
+			/* Pin D9: PS2CLK2/GPF4 -> SPI_EC_HOLD_MEM_R_L */
+			gpios = <&gpiof 4 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		/* USB2 / USB3 Mux Controls (Host, Hub, DUT) */
+		usb3_mux_hub_oe_l: usb3_mux_hub_oe_l {
+			/* Pin J2: EIO1/LAD1/GPM1 -> USB3_MUX_HUB_OE_L */
+			gpios = <&gpiom 1 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb3_mux_hub_sel: usb3_mux_hub_sel {
+			/* Pin K1: EIO0/LAD0/GPM0 -> USB3_MUX_HUB_SEL */
+			gpios = <&gpiom 0 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		usb2_mux_hub_oe_l: usb2_mux_hub_oe_l {
+			/* Pin H2: EIO3/LAD3/GPM3 -> USB2_MUX_HUB_OE_L */
+			gpios = <&gpiom 3 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb2_mux_hub_sel: usb2_mux_hub_sel {
+			/* Pin J1: EIO2/LAD2/GPM2 -> USB2_MUX_HUB_SEL */
+			gpios = <&gpiom 2 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		usb3_mux_dut_oe: usb3_mux_dut_oe_r_l {
+			/* Pin N7: GINT/CTS0#/GPD5 -> USB3_MUX_DUT_OE_L */
+			gpios = <&gpiod 5 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb3_mux_dut_sel: usb3_mux_dut_sel_r {
+			/* Pin M11: TACH0A/GPD6 -> USB3_MUX_DUT_SEL */
+			gpios = <&gpiod 6 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		usb2_mux_dut_oe: usb2_mux_dut_oe_r_l {
+			/* Pin M12: TACH1A/GPD7 -> USB2_MUX_DUT_OE_L */
+			gpios = <&gpiod 7 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb2_mux_dut_sel: usb2_mux_dut_sel_r {
+			/* Pin G1: GPJ7 -> USB2_MUX_DUT_SEL */
+			gpios = <&gpioj 7 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		usb3_mux_host_oe: usb3_mux_host_oe_r_l {
+			/* Pin A12: SMDAT5/GPE2 -> USB3_MUX_HOST_OE_R_L
+			 *
+			 * Active-low output-enable for the USB3 host mux.
+			 * Boots asserted so the mux drives from reset: with
+			 * host_mux disabled on this board (CONFIG_MAUI_HOST_MUX)
+			 * nothing else ever enables it, and a disabled buffer
+			 * leaves the USB3 host path dead.
+			 */
+			gpios = <&gpioe 2 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb3_mux_host_sel: usb3_mux_host_sel_r {
+			/* Pin B12: GPE3 -> USB3_MUX_HOST_SEL_R */
+			gpios = <&gpioe 3 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+		};
+
+		/* ==================== Digital Inputs ==================== */
+
+		i2c_temp_alert: i2c_temp_alert {
+			/* Pin C1: SMDAT2ALT/GPF7 -> I2C_TEMP_ALERT */
+			gpios = <&gpiof 7 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		};
+
+		/* H2H Prolific PL27A1 Access LED Indicators */
+		h2h_host_access_led_l: h2h_host_access_led_l {
+			/* Pin H4: KBRST#/GPB6 -> H2H_HOST_ACCESS_LED_L */
+			gpios = <&gpiob 6 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		h2h_dut_host_access_led_l: h2h_dut_host_access_led_l {
+			/* Pin K7: PWM7/RIG1#/GPA7 -> H2H_DUT_HOST_ACCESS_LED_L */
+			gpios = <&gpioa 7 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		h2h_dut_access_led_l: h2h_dut_access_led_l {
+			/* Pin L2: ECSMI#/GPD4 -> H2H_DUT_ACCESS_LED_L */
+			gpios = <&gpiod 4 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		/* Power Good & Rail Status Monitors */
+		pp1200_pg_od: pp1200_pg_od {
+			/* Pin A10: PS2CLK1/DTR0#/GPF2 -> PP1200_PG_OD */
+			gpios = <&gpiof 2 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pp3300_pg_od: pp3300_pg_od {
+			/* Pin B13: DCD0#/GPJ4 -> PP3300_PG_OD */
+			gpios = <&gpioj 4 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pp1100_pg_od: pp1100_pg_od {
+			/* Pin D8: CLKRUN#/GPH0 -> PP1100_PG_OD */
+			gpios = <&gpioh 0 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pp3300_ec_status: pp3300_ec_status {
+			/* Pin J6: PWM5/SMDAT5ALT/GPA5 -> PP3300_EC_STATUS */
+			gpios = <&gpioa 5 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		/* USB Hub Status & Suspend Monitors */
+		hub_ss_up_status: hub_ss_up_status {
+			/* Pin B8: GPH4 -> HUB_SS_UP_STATUS */
+			gpios = <&gpioh 4 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		hub_hs_up_status: hub_hs_up_status {
+			/* Pin E12: TACH2/GPJ0 -> HUB_HS_UP_STATUS */
+			gpios = <&gpioj 0 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		hub_hs_suspend: hub_hs_suspend {
+			/* Pin D13: GPJ1 -> HUB_HS_SUSPEND */
+			gpios = <&gpioj 1 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		hub_ss_suspend: hub_ss_suspend {
+			/* Pin M5: PWM0/GPA0 -> HUB_SS_SUSPEND */
+			gpios = <&gpioa 0 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		/* TI TPS66994 PDC Interrupt & Status GPIOs */
+		pdc_hi_priority_irq_l: pdc_hi_priority_irq_l {
+			/*
+			 * Pin N5: PWM1/GPA1 -> PDC_HI_PRIORITY_IRQ_L.
+			 * Pulled up on the board, so no internal pull here.
+			 */
+			gpios = <&gpioa 1 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		pdc_gpio8: pdc_gpio8 {
+			/* Pin G2: ALERT#/SERIRQ/GPM6 -> PDC_GPIO8 */
+			gpios = <&gpiom 6 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pdc_gpio9: pdc_gpio9 {
+			/* Pin N3: RI2#/GPD1 -> PDC_GPIO9 */
+			gpios = <&gpiod 1 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pdc_gpio10: pdc_gpio10 {
+			/* Pin M4: ERST#/LPCRST#/GPD2 -> PDC_GPIO10 */
+			gpios = <&gpiod 2 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		pdc_gpio11: pdc_gpio11 {
+			/* Pin N4: ECSCI#/GPD3 -> PDC_GPIO11 */
+			gpios = <&gpiod 3 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+	};
+};
+
+&flash0 {
+	reg = <0x80000000 DT_SIZE_M(1)>;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* 96 KB RO Bootloader (Sectors 0..23) */
+		boot_partition: ro_boot_partition: partition@0 {
+			label = "ro_bootloader";
+			reg = <0x00000000 DT_SIZE_K(96)>;
+			read-only;
+		};
+
+		/* 128 KB RW Bootloader (Sectors 24..55) */
+		rw_boot_partition: partition@18000 {
+			label = "rw_bootloader";
+			reg = <0x00018000 DT_SIZE_K(128)>;
+		};
+
+		/* 768 KB Main Application (Sectors 56..247) */
+		slot0_partition: partition@38000 {
+			label = "image-0";
+			reg = <0x00038000 DT_SIZE_K(768)>;
+		};
+
+		/* 32 KB NVS Key-Value Storage (Sectors 248..255) */
+		storage_partition: partition@f8000 {
+			label = "storage";
+			reg = <0x000F8000 DT_SIZE_K(32)>;
+		};
+	};
+};
+
+&sram0 {
+	reg = <0x80100000 DT_SIZE_K(256)>;
+};
+
+/* UART1: Debug UART on Pins A4 (SIN0/GPB0) & A3 (SOUT0/GPB1) */
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	clock-frequency = <1804800>;
+};
+
+&ite_uart1_wrapper {
+	status = "okay";
+	pinctrl-0 = <&uart1_rx_gpb0_default
+		     &uart1_tx_gpb1_default>;
+	pinctrl-names = "default";
+};
+
+/*
+ * UART2: PDC Debug Trace UART RX on Pin A11 (SIN1/GPF0).
+ *
+ * DISABLED - the IT82002 cannot receive this stream. The TPS6699x emits its
+ * debug trace at 12 MBaud (see maui_proto_3507.dts, which sets
+ * current-speed = <12000000> on its PDC trace UART), but the IT8xxx2 UART
+ * tops out at 460800:
+ *   - the standard path divides a fixed 1.8432 MHz clock, so 115200 is the
+ *     maximum, and
+ *   - the high-speed ECSPMR path (CONFIG_UART_NS16550_ITE_HIGH_SPEED_BAUDRATE)
+ *     only has hardcoded divisors for 230400 and 460800; any other rate
+ *     leaves the divisor at 0 and misconfigures the port.
+ * There is no clock-source select to raise the ceiling.
+ *
+ * Capture the PDC trace with a scope or logic analyser on pin A11 instead.
+ * Re-enable this (together with the pdc-debug-uart alias, which
+ * tps6699x.c needs under CONFIG_PDC_DEBUG) only if the PDC is ever
+ * reconfigured to emit at <= 460800.
+ *
+ * &uart2 {
+ *	status = "okay";
+ *	current-speed = <115200>;
+ * };
+ *
+ * &ite_uart2_wrapper {
+ *	status = "okay";
+ *	pinctrl-0 = <&uart2_rx_gpf0_default>;
+ *	pinctrl-names = "default";
+ * };
+ */
+
+/* USB 2.0 Device: Upstream CDC-ACM to Hub on Pins A8 (GPH5/DM) & B7 (GPH6/DP) */
+zephyr_udc0: &usb0 {
+	status = "okay";
+	pinctrl-0 = <&usb0_dm_gph5_default &usb0_dp_gph6_default>;
+	pinctrl-names = "default";
+
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
+/* I2C0: TI TPS66994 PDC on Pins A5 (SMCLK0/GPB3) & A2 (SMDAT0/GPB4), IRQ Pin C12 (GPJ5) */
+&i2c0 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	pinctrl-0 = <&i2c0_clk_gpb3_default
+		     &i2c0_data_gpb4_default>;
+	pinctrl-names = "default";
+
+	pdc: tps6699x@20 {
+		compatible = "ti,tps6699x";
+		reg = <0x20>;
+		status = "okay";
+		irq-gpios = <&gpioj 5 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+	};
+};
+
+/* I2C1: USB Hub SMBus on Pins B3 (SMCLK1/GPC1) & B2 (SMDAT1/GPC2) */
+&i2c1 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	pinctrl-0 = <&i2c1_clk_gpc1_default
+		     &i2c1_data_gpc2_default>;
+	pinctrl-names = "default";
+};
+
+/* I2C2: TI TMP110 Thermal Sensor on Pins M2 (SMCLK2/GPC7) & N1 (SMDAT2/GPD0).
+ *
+ * Deliberately uses the primary SMCLK2/SMDAT2 pins, not the *ALT* variants:
+ * C1 (SMDAT2ALT/GPF7) is wired to I2C_TEMP_ALERT and used as a GPIO.
+ *
+ * i2c3/i2c4/i2c5 stay disabled on this board and must NOT be enabled:
+ *   i2c4 SMCLK4/SMDAT4 = GPE0/GPE7 = JTAG_EC_SWCLK / JTAG_EC_SWDIO
+ *   i2c5 SMCLK5/SMDAT5 = GPE1/GPE2 = EC_LED_AMBER / USB3_MUX_HOST_OE_R_L
+ * Enabling either would mux those pins away from their board function.
+ */
+&i2c2 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	pinctrl-0 = <&i2c2_clk_gpc7_default
+		     &i2c2_data_gpd0_default>;
+	pinctrl-names = "default";
+
+	/*
+	 * The fitted part is a TMP110. TI documents it as register-compatible
+	 * with the TMP112/TMP102 (same pointer register, same config layout,
+	 * same 0.0625 C/LSB) and Zephyr has no tmp110 driver, so ti,tmp112 is
+	 * the right binding.
+	 *
+	 * Do NOT add the 'extended-mode' property: it sets the config EM bit
+	 * and switches the driver to 13-bit sample parsing, which the 12-bit
+	 * TMP110 does not support and which would corrupt every reading.
+	 */
+	board_temp_sensor: tmp112@49 {
+		compatible = "ti,tmp112";
+		reg = <0x49>;
+		status = "okay";
+	};
+};
+
+/* SPI0 (SSPI0): Prolific PL27A1 H2H External SPI NOR Flash Programming Interface
+ * Pins: M7 (SSCK/GPA6), K13 (SMOSI/GPC3), J10 (SMISO/GPC5), E7 (SSCE0#/GPG2)
+ */
+&spi0 {
+	status = "okay";
+	pinctrl-0 = <&spi_ssck_default
+		     &spi_smosi_default
+		     &spi_smiso_default>;
+	pinctrl-names = "default";
+	/*
+	 * CS is driven as a plain GPIO, not the SSCE0# alternate function, so
+	 * it stays asserted across a multi-buffer transaction - SPI-NOR
+	 * command+address+data transfers need that.
+	 *
+	 * Do NOT add &spi_ssce0_default to pinctrl-0 above: it muxes this same
+	 * pin (GPG2) to IT8XXX2_ALT_FUNC_3, and spi_context_cs_configure_all()
+	 * immediately reconfigures it back to GPIO anyway.
+	 */
+	cs-gpios = <&gpiog 2 GPIO_ACTIVE_LOW>;
+};

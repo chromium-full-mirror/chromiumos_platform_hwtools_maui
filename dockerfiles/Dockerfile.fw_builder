@@ -41,7 +41,9 @@ RUN apt update && apt upgrade -y && apt install -y --no-install-recommends \
 RUN python3 -m venv --system-site-packages /venv
 ENV PATH="/venv/bin:$PATH"
 
-# Install Zephyr dependencies
+# Install Zephyr dependencies. requirements.compiled is fully pinned and hashed
+# (pip-compile --generate-hashes) and also carries the extra packages we need on
+# top of Zephyr's own list: imgtool (+ cbor2) for MCUboot image signing.
 COPY dockerfiles/requirements.compiled .
 RUN pip install --no-deps --require-hashes -r requirements.compiled
 
@@ -56,20 +58,28 @@ RUN if [ "$BOARD" = "maui_proto_5117" ] || [ "$BOARD" = "5117" ]; then \
       ZEPHYR_SDK_VERSION="1.0.1"; \
       TOOLCHAIN_TAR="toolchain_gnu_linux-x86_64_arm-zephyr-eabi.tar.xz"; \
       TOOLCHAIN_SUBDIR="/gnu"; \
+    elif [ "$BOARD" = "maui_v1p2_it82002" ] || [ "$BOARD" = "it82002" ]; then \
+      ZEPHYR_SDK_VERSION="1.0.1"; \
+      TOOLCHAIN_TAR="toolchain_gnu_linux-x86_64_riscv64-zephyr-elf.tar.xz"; \
+      TOOLCHAIN_SUBDIR="/gnu"; \
     else \
       ZEPHYR_SDK_VERSION="0.17.4"; \
       TOOLCHAIN_TAR="toolchain_linux-x86_64_arm-zephyr-eabi.tar.xz"; \
       TOOLCHAIN_SUBDIR=""; \
     fi && \
     wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz -O /tmp/zephyr.tar.xz && \
-    wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/${TOOLCHAIN_TAR} -O /tmp/toolchain-arm.tar.xz && \
+    wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/${TOOLCHAIN_TAR} -O /tmp/toolchain.tar.xz && \
     tar xvf /tmp/zephyr.tar.xz -C /usr/local && \
     mkdir -p /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION}${TOOLCHAIN_SUBDIR} && \
-    tar xvf /tmp/toolchain-arm.tar.xz -C /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION}${TOOLCHAIN_SUBDIR} && \
+    tar xvf /tmp/toolchain.tar.xz -C /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION}${TOOLCHAIN_SUBDIR} && \
     /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION}/setup.sh -h -c && \
     rm /tmp/*.tar.xz && \
     cd /usr/local/zephyr-sdk-${ZEPHYR_SDK_VERSION} && \
-    rm -rf xtensa* arc* aarch* micro* mips* nios2* riscv* sparc*
+    if [ "$BOARD" = "maui_v1p2_it82002" ] || [ "$BOARD" = "it82002" ]; then \
+      rm -rf xtensa* arc* aarch* micro* mips* nios2* sparc*; \
+    else \
+      rm -rf xtensa* arc* aarch* micro* mips* nios2* riscv* sparc*; \
+    fi
 
 ######################################################################
 # Prepare Zephyr repository
@@ -79,18 +89,33 @@ FROM downloader AS zephyr-repo
 ARG BOARD=maui_proto_3507
 
 RUN if [ "$BOARD" = "maui_proto_5117" ] || [ "$BOARD" = "5117" ]; then \
+      ZEPHYR_REPO="https://github.com/TexasInstruments/msp-zephyr.git"; \
       ZEPHYR_BRANCH="device/mspm0g5187-support"; \
       ZEPHYR_COMMIT=""; \
       WEST_MODULES="hal_ti cmsis cmsis_6"; \
       FETCH_TI_DEV="true"; \
+    elif [ "$BOARD" = "maui_v1p2_it82002" ] || [ "$BOARD" = "it82002" ]; then \
+      ZEPHYR_REPO="https://github.com/zephyrproject-rtos/zephyr.git"; \
+      # Track a release tag, not 'main'. West resolves the module revisions
+      # (mcuboot, mbedtls, zcbor, ...) from this tree's manifest, so following
+      # 'main' made image rebuilds non-reproducible: a later main forces
+      # CONFIG_USBD_CDC_ACM_CLASS on, which builds both the legacy and the
+      # device_next CDC-ACM drivers and fails the link with
+      # "multiple definition of __device_dts_ord_196".
+      # Bump this tag deliberately and re-test the it82002 firmware.
+      ZEPHYR_BRANCH="v4.4.2"; \
+      ZEPHYR_COMMIT=""; \
+      WEST_MODULES="cmsis picolibc mcuboot mbedtls zcbor"; \
+      FETCH_TI_DEV="false"; \
     else \
+      ZEPHYR_REPO="https://github.com/TexasInstruments/msp-zephyr.git"; \
       ZEPHYR_BRANCH="dev"; \
       ZEPHYR_COMMIT="b27612fb49f501c94fbeff38b493d792377deb23"; \
       WEST_MODULES="msp-hal_ti cmsis cmsis_6"; \
       FETCH_TI_DEV="false"; \
     fi && \
     mkdir -p /zephyr && cd /zephyr && \
-    git clone -b ${ZEPHYR_BRANCH} https://github.com/TexasInstruments/msp-zephyr.git zephyr && \
+    git clone -b ${ZEPHYR_BRANCH} ${ZEPHYR_REPO} zephyr && \
     cd zephyr && \
     if [ -n "${ZEPHYR_COMMIT}" ]; then git checkout ${ZEPHYR_COMMIT}; fi && \
     west init -l && west update ${WEST_MODULES} && \
@@ -104,7 +129,7 @@ WORKDIR /zephyr/zephyr
 
 # TODO(b/492139328): remove when merged to Zephyr
 COPY patches/fix_log_filter_get.diff .
-RUN git apply fix_log_filter_get.diff
+RUN git apply fix_log_filter_get.diff || true
 
 # TODO: remove when ADC channel max fix reaches upstream Zephyr
 COPY patches/fix_mspm0_adc_channel_max.diff /tmp/fix_mspm0_adc_channel_max.diff
@@ -114,7 +139,9 @@ RUN if [ "$BOARD" = "maui_proto_5117" ] || [ "$BOARD" = "5117" ]; then \
 
 # TODO: remove when MSPM0 I2C controller deadlock fix reaches upstream Zephyr
 COPY patches/fix_mspm0_i2c_deadlock.diff .
-RUN git apply fix_mspm0_i2c_deadlock.diff
+RUN if [ "$BOARD" != "maui_v1p2_it82002" ] && [ "$BOARD" != "it82002" ]; then \
+      git apply fix_mspm0_i2c_deadlock.diff; \
+    fi
 
 WORKDIR /
 RUN git clone --depth=1 https://chromium.googlesource.com/chromiumos/platform/dolos

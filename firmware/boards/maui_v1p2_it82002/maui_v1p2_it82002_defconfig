@@ -1,0 +1,39 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Board defaults for maui_v1p2_it82002.
+#
+# These are applied to EVERY image built for this board, including the MCUboot
+# RO and RW Bootloaders. Only put hardware/SoC settings here that are correct
+# for any image. Application-only settings belong in
+# firmware/boards/maui_v1p2_it82002.conf.
+
+CONFIG_SERIAL=y
+CONFIG_CONSOLE=y
+CONFIG_UART_CONSOLE=y
+CONFIG_UART_INTERRUPT_DRIVEN=y
+CONFIG_UART_NS16550=y
+CONFIG_UART_ITE_IT8XXX2_INIT_PRIORITY=90
+
+CONFIG_CLOCK_CONTROL=n
+CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=32768
+CONFIG_SYS_CLOCK_TICKS_PER_SEC=32768
+
+CONFIG_GPIO=y
+
+# Run from ILM (SRAM) for speed. Both bootloaders override this to =n because
+# chainloading between XIP images requires the SCAR ILM mappings to be torn
+# down; see it82002_disable_ilm_mappings().
+CONFIG_SOC_IT8XXX2_SERIAL_IN_RAM=y
+CONFIG_SOC_IT8XXX2_KERNEL_IN_RAM=y
+CONFIG_SOC_IT8XXX2_ZEPHYR_IN_RAM=y
+
+# Needed by every image: the bootloaders read the serial number and the boot
+# target out of NVS/BBRAM before they chainload.
+CONFIG_FLASH=y
+CONFIG_FLASH_PAGE_LAYOUT=y
+CONFIG_FLASH_MAP=y
+CONFIG_NVS=y
+CONFIG_BBRAM=y
+CONFIG_BBRAM_IT8XXX2=y

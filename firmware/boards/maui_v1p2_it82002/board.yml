@@ -1,0 +1,9 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+board:
+  name: maui_v1p2_it82002
+  full_name: Maui v1.2 (ITE IT82002)
+  socs:
+    - name: it82002aw

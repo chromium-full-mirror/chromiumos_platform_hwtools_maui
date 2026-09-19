@@ -1238,15 +1238,15 @@ static int tps6699x_init(const struct device *dev)
 	union reg_status status;
 	int ret;
 
-	ret = tps_init_interrupt(dev);
-	if (ret < 0) {
+	/* Probe PDC over I2C first before enabling GPIO interrupts */
+	ret = tps_rd_status(dev, &status);
+	if (ret) {
+		LOG_WRN("Failed to read PDC status (%d); PDC not present", ret);
 		return ret;
 	}
 
-	/* Check for pre-existing contract */
-	ret = tps_rd_status(dev, &status);
-	if (ret) {
-		LOG_ERR("Failed to read Status: %d", ret);
+	ret = tps_init_interrupt(dev);
+	if (ret < 0) {
 		return ret;
 	}
 

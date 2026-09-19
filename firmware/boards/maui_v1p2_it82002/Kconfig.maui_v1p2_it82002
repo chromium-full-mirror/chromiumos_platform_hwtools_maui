@@ -1,0 +1,8 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+config BOARD_MAUI_V1P2_IT82002
+	bool "Maui v1.2 (ITE IT82002)"
+	select BOARD_IT8XXX2
+	select SOC_IT82002AW

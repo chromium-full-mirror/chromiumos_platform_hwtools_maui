@@ -1,0 +1,9 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# Input for: pip-compile --generate-hashes requirements.utils.in
+#
+# smpmgr is the SMP (Simple Management Protocol) client used by maui-flash to
+# push signed images to a device sitting in MCUboot serial recovery.
+smpmgr

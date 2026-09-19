@@ -41,8 +41,63 @@ config HOST_MUX_HIGH_THRESH
 	int "Lower voltage threshold to treat signal as high (millivolts)"
 	default 200
 
+config MAUI_HOST_MUX
+	bool "Automatic USB host mux / hub control"
+	default n if SOC_IT82002AW
+	default y
+	help
+	  Polls the Host CC lanes and drives HUB_RESET_L and the USB3 host mux
+	  select/output-enable lines accordingly.
+
+	  Disabled on maui_v1p2_it82002 for bring-up: the EC's own USB device
+	  reaches the host through that hub, so a mis-detected CC state takes
+	  the console and the firmware-update path down with it. With this off
+	  the mux and hub keep the boot states configured in the board
+	  devicetree, which are the states we want for bring-up anyway.
+
 config GPIO_INIT_PRIORITY
 	int "GPIO subsystem init priority"
 	default 89
+
+config MAUI_HEALTH
+	bool "Boot health monitoring, crashloop counter and ETWD reset"
+	default y if SOC_IT82002AW
+	help
+	  Boot-target selection and the crashloop counter in BBRAM, the ETWD
+	  hardware reset used by 'reboot'/'reset', and the 'health' shell
+	  command group.
+
+	  Only maui_v1p2_it82002 has the BBRAM and the 3-stage bootloader chain
+	  this depends on; the MSPM0 boards fall back to sys_reboot().
+
+config MAUI_NVS_STORAGE
+	bool "NVS-backed persistent storage (serial number, boot target)"
+	default y if SOC_IT82002AW
+	depends on NVS
+	help
+	  Backs the 'serial get'/'serial set' shell commands and the USB serial
+	  number reported by all three boot stages.
+
+	  Requires a 'storage_partition' node, which only maui_v1p2_it82002
+	  defines.
+
+config MAUI_HEALTH_FLASH_DIAGNOSTICS
+	bool "Enable destructive flash-protection diagnostics in the health shell"
+	depends on MAUI_HEALTH && SOC_IT82002AW
+	default y
+	help
+	  Adds 'health test_flash_protect', 'health lock_eplr' and
+	  'health probe_eplr'.
+
+	  These are bring-up tools that manipulate hardware write protection
+	  directly. test_flash_protect deliberately erases and rewrites
+	  bootloader sectors to prove the hardware blocks it; if protection is
+	  ever not armed, that attack succeeds and destroys both bootloaders,
+	  leaving the board recoverable only with an external programmer. It
+	  does check the EWPR registers and abort first, but that check is only
+	  as good as our understanding of the silicon.
+
+	  Turn this off for production images. 'health status' stays available
+	  and reports the same protection state non-destructively.
 
 source "Kconfig.zephyr"
