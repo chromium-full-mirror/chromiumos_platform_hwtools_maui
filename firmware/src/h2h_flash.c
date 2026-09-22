@@ -16,6 +16,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/util.h>
 
 LOG_MODULE_REGISTER(h2h_flash);
 
@@ -85,19 +86,19 @@ static int h2h_spi_xfer(const uint8_t *tx, size_t tx_len, uint8_t *rx,
 static int h2h_wait_ready(uint32_t timeout_ms)
 {
 	int64_t deadline = k_uptime_get() + timeout_ms;
-	uint8_t cmd[2] = { SPI_CMD_RDSR, 0x00 };
-	uint8_t rx[2] = { 0 };
+	uint8_t cmd = SPI_CMD_RDSR;
+	uint8_t status = 0;
 
 	while (k_uptime_get() < deadline) {
-		int rc = h2h_spi_xfer(cmd, sizeof(cmd), rx, sizeof(rx));
+		int rc = h2h_spi_xfer(&cmd, 1, &status, 1);
 		if (rc != 0) {
 			return rc;
 		}
-		if (rx[1] == 0xFF) {
+		if (status == 0xFF) {
 			/* MISO floating/unconnected */
 			return -ENODEV;
 		}
-		if ((rx[1] & SPI_SR_WIP) == 0) {
+		if ((status & SPI_SR_WIP) == 0) {
 			return 0;
 		}
 		k_msleep(1);
@@ -172,30 +173,17 @@ int h2h_flash_read(off_t offset, void *data, size_t len)
 			(uint8_t)((offset >> 8) & 0xFF),
 			(uint8_t)(offset & 0xFF),
 		};
-		uint8_t rx_full[260];
 
 		if (!device_is_ready(h2h_spi_dev)) {
 			k_mutex_unlock(&h2h_spi_lock);
 			return -ENODEV;
 		}
 
-		memset(sram_tx_buf, 0, chunk + 4);
-		memcpy(sram_tx_buf, tx, 4);
-		memset(sram_rx_buf, 0, chunk + 4);
-
-		struct spi_buf tx_b = { .buf = sram_tx_buf, .len = chunk + 4 };
-		struct spi_buf_set tx_s = { .buffers = &tx_b, .count = 1 };
-		struct spi_buf rx_b = { .buf = sram_rx_buf, .len = chunk + 4 };
-		struct spi_buf_set rx_s = { .buffers = &rx_b, .count = 1 };
-
-		int rc =
-			spi_transceive(h2h_spi_dev, &h2h_spi_cfg, &tx_s, &rx_s);
+		int rc = h2h_spi_xfer(tx, sizeof(tx), out, chunk);
 		if (rc != 0) {
 			k_mutex_unlock(&h2h_spi_lock);
 			return rc;
 		}
-		memcpy(rx_full, sram_rx_buf, chunk + 4);
-		memcpy(out, &rx_full[4], chunk);
 
 		out += chunk;
 		offset += chunk;
@@ -395,12 +383,96 @@ static int cmd_h2h_erase(const struct shell *sh, size_t argc, char **argv)
 	return rc;
 }
 
+static int cmd_h2h_id(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	bool auto_acquired = false;
+	if (!bus_acquired) {
+		(void)h2h_spi_acquire();
+		auto_acquired = true;
+	}
+
+	uint8_t cmd = SPI_CMD_JEDEC_ID;
+	uint8_t rx[3] = { 0 };
+
+	int rc = h2h_spi_xfer(&cmd, 1, rx, sizeof(rx));
+	if (rc == 0) {
+		shell_print(
+			sh,
+			"JEDEC ID: 0x%02X 0x%02X 0x%02X (Manufacturer: 0x%02X, Type: 0x%02X, Capacity: 0x%02X)",
+			rx[0], rx[1], rx[2], rx[0], rx[1], rx[2]);
+	} else {
+		shell_error(sh, "Failed to read JEDEC ID (%d)", rc);
+	}
+
+	if (auto_acquired) {
+		(void)h2h_spi_release();
+	}
+	return rc;
+}
+
+static int cmd_h2h_write(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 3) {
+		shell_error(sh,
+			    "Usage: h2h_flash write <offset_hex> <hex_string>");
+		shell_error(sh,
+			    "Example: h2h_flash write 0x0 deadbeef12345678");
+		return -EINVAL;
+	}
+
+	off_t offset = (off_t)strtoul(argv[1], NULL, 0);
+	const char *hex = argv[2];
+
+	if (hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X')) {
+		hex += 2;
+	}
+
+	size_t hex_len = strlen(hex);
+	if (hex_len == 0 || (hex_len % 2) != 0 || hex_len > 512) {
+		shell_error(
+			sh,
+			"Data must be an even number of hex digits (up to 256 bytes)");
+		return -EINVAL;
+	}
+
+	uint8_t buf[256];
+	size_t bin_len = hex2bin(hex, hex_len, buf, sizeof(buf));
+	if (bin_len == 0) {
+		shell_error(sh, "Failed to parse hex string '%s'", argv[2]);
+		return -EINVAL;
+	}
+
+	bool auto_acquired = false;
+	if (!bus_acquired) {
+		(void)h2h_spi_acquire();
+		auto_acquired = true;
+	}
+
+	int rc = h2h_flash_write(offset, buf, bin_len);
+	if (rc == 0) {
+		shell_print(sh, "Wrote %zu bytes to offset 0x%lx", bin_len,
+			    (unsigned long)offset);
+	} else {
+		shell_error(sh, "Flash write failed (%d)", rc);
+	}
+
+	if (auto_acquired) {
+		(void)h2h_spi_release();
+	}
+	return rc;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_h2h_flash_cmds,
 	SHELL_CMD(acquire, NULL, "Acquire H2H SPI bus for EC", cmd_h2h_acquire),
 	SHELL_CMD(release, NULL, "Release H2H SPI bus to PL27A1",
 		  cmd_h2h_release),
+	SHELL_CMD(id, NULL, "Read JEDEC ID from H2H flash", cmd_h2h_id),
 	SHELL_CMD(read, NULL, "Read bytes from H2H flash", cmd_h2h_read),
+	SHELL_CMD(write, NULL, "Write hex bytes to H2H flash", cmd_h2h_write),
 	SHELL_CMD(erase, NULL, "Erase sectors on H2H flash", cmd_h2h_erase),
 	SHELL_SUBCMD_SET_END);
 

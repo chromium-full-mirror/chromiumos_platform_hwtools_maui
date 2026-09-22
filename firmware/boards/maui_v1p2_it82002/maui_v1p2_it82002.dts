@@ -439,16 +439,7 @@ zephyr_udc0: &usb0 {
 	status = "okay";
 	pinctrl-0 = <&spi_ssck_default
 		     &spi_smosi_default
-		     &spi_smiso_default>;
+		     &spi_smiso_default
+		     &spi_ssce0_default>;
 	pinctrl-names = "default";
-	/*
-	 * CS is driven as a plain GPIO, not the SSCE0# alternate function, so
-	 * it stays asserted across a multi-buffer transaction - SPI-NOR
-	 * command+address+data transfers need that.
-	 *
-	 * Do NOT add &spi_ssce0_default to pinctrl-0 above: it muxes this same
-	 * pin (GPG2) to IT8XXX2_ALT_FUNC_3, and spi_context_cs_configure_all()
-	 * immediately reconfigures it back to GPIO anyway.
-	 */
-	cs-gpios = <&gpiog 2 GPIO_ACTIVE_LOW>;
 };
