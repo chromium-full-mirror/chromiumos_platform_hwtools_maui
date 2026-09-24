@@ -7,3 +7,7 @@
 # smpmgr is the SMP (Simple Management Protocol) client used by maui-flash to
 # push signed images to a device sitting in MCUboot serial recovery.
 smpmgr
+
+# protobuf is the runtime for tools/maui_libs/proto (the Maui RPC channel).
+# The checked-in gencode must not be newer than this runtime.
+protobuf

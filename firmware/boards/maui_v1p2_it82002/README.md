@@ -255,6 +255,22 @@ dmesg | tail    # "Maui RO Recovery Bootloader" / "Maui RW Bootloader"
 > when it connects to a bootloader. This is expected and harmless — MCUboot's SMP
 > server does not implement that command.
 
+### H2H bridge (PL27A1) SPI flash
+
+The Application exposes a second CDC-ACM interface, **"Maui RPC"** (usually
+`/dev/ttyACM1`), carrying the COBS/Nanopb protocol in
+`firmware/proto/maui_rpc.proto`. `maui-flash` streams the raw image over it;
+the MCU holds the PL27A1 in reset, erases the whole flash, programs it and
+verifies a CRC-32 read back over SPI, then releases the bridge:
+
+```shell
+./tools/scripts/maui-flash h2h --file pl27a1.bin
+./tools/scripts/maui-flash h2h --info     # JEDEC ID and size only
+```
+
+The `h2h_flash` shell commands on ACM0 remain available for manual debugging;
+they are refused while an RPC flashing session owns the flash.
+
 ---
 
 ## 5. Flash write-protection

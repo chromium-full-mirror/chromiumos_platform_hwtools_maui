@@ -70,10 +70,21 @@ trap 'rm -rf "$HOST_TMP_DIR"' EXIT
 CONTAINER_MOUNT_POINT="/mnt/firmware_dir"
 CMD_ARGS=()
 FILE_ARG_NEXT=0
+READ_ARG_NEXT=0
+# Host path for an output file written by the tool (h2h --read).
+OUT_HOST_PATH=""
+
+map_output_file() {
+    OUT_HOST_PATH="$1"
+    CMD_ARGS+=("$CONTAINER_MOUNT_POINT/$(basename "$1")")
+}
 
 # Iterate through parsed tool arguments to find file paths
 for arg in "${TOOL_ARGS[@]}"; do
-    if [ "$FILE_ARG_NEXT" -eq 1 ]; then
+    if [ "$READ_ARG_NEXT" -eq 1 ]; then
+        map_output_file "$arg"
+        READ_ARG_NEXT=0
+    elif [ "$FILE_ARG_NEXT" -eq 1 ]; then
         # This argument is the file path for --file (space separated)
         if [ -f "$arg" ]; then
             FILE_NAME="$(basename "$arg")"
@@ -98,6 +109,12 @@ for arg in "${TOOL_ARGS[@]}"; do
     elif [ "$arg" == "--file" ]; then
         CMD_ARGS+=("$arg")
         FILE_ARG_NEXT=1
+    elif [[ "$arg" == "--read="* ]]; then
+        CMD_ARGS+=("--read")
+        map_output_file "${arg#--read=}"
+    elif [ "$arg" == "--read" ]; then
+        CMD_ARGS+=("$arg")
+        READ_ARG_NEXT=1
     else
         CMD_ARGS+=("$arg")
     fi
@@ -110,3 +127,9 @@ docker run --rm -it \
     -v "$HOST_TMP_DIR:$CONTAINER_MOUNT_POINT" \
     "${IMAGE_TAG}" \
     maui-flash "${CMD_ARGS[@]}"
+
+# Copy an output file back to the requested host path
+if [ -n "$OUT_HOST_PATH" ]; then
+    cp "$HOST_TMP_DIR/$(basename "$OUT_HOST_PATH")" "$OUT_HOST_PATH"
+    echo "Saved $OUT_HOST_PATH"
+fi

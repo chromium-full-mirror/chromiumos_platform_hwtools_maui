@@ -31,6 +31,9 @@ MAUI_FINAL_PID = 0x5085  # Maui Legacy / MSPM0 PID
 MAUI_IT82002_APP_PID = 0x5066  # Maui IT82002 Main App PID
 MAUI_IT82002_BOOTLOADER_PID = 0x5067  # Maui IT82002 MCUboot Recovery PID
 
+# USB interface string of the IT82002 App's RPC CDC-ACM port.
+MAUI_RPC_INTERFACE_NAME = "Maui RPC"
+
 
 class MauiSerialTransport:
     """Manages serial communication with a Maui device."""
@@ -274,8 +277,13 @@ def list_maui_devices():
                 }
             )
         # Check for Final (Native USB CDC ACM) devices
-        # (App or Bootloader sharing 0x18D1:0x5085)
-        elif port.vid == MAUI_FINAL_VID and port.pid == MAUI_FINAL_PID:
+        # (App or Bootloader sharing 0x18D1:0x5085). The App's second
+        # interface is the machine RPC channel (maui_libs.rpc), not a shell.
+        elif (
+            port.vid == MAUI_FINAL_VID
+            and port.pid == MAUI_FINAL_PID
+            and (port.interface or "") != MAUI_RPC_INTERFACE_NAME
+        ):
             is_bootloader = "BOOTLOADER" in (port.product or "").upper()
             devices.append(
                 {
@@ -292,7 +300,11 @@ def list_maui_devices():
                 }
             )
         # Check for IT82002 Main Application (Native USB CDC ACM)
-        elif port.vid == MAUI_FINAL_VID and port.pid == MAUI_IT82002_APP_PID:
+        elif (
+            port.vid == MAUI_FINAL_VID
+            and port.pid == MAUI_IT82002_APP_PID
+            and (port.interface or "") != MAUI_RPC_INTERFACE_NAME
+        ):
             devices.append(
                 {
                     "type": "it82002_app",

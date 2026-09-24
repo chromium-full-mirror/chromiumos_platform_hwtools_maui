@@ -18,15 +18,21 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+import zlib
 
 from maui_libs import cli
 from maui_libs.device import MauiDevice
+from maui_libs.h2h import H2H_IMAGE_SIZE
+from maui_libs.h2h import H2hFlasher
 from maui_libs.pdc import MauiPdcClientAdapter
 from maui_libs.pdc import Tps6699xFirmwareUpdater
+from maui_libs.rpc import find_rpc_port
+from maui_libs.rpc import RpcClient
 from maui_libs.transport import MAUI_FINAL_PID
 from maui_libs.transport import MAUI_FINAL_VID
 from maui_libs.transport import MAUI_IT82002_BOOTLOADER_PID
@@ -503,32 +509,125 @@ def handle_mcu_update(device, args):
             os.remove(temp_file)
 
 
-def handle_h2h_update(device, args):
-    """Handles Prolific PL27A1 H2H external SPI flash operations."""
-    device.connect()
+class _H2hProgressPrinter:
+    """Progress display for H2H flashing.
+
+    Called from both the main thread (writes) and the RPC reader thread
+    (erase/verify events). On a terminal it redraws one line per phase;
+    otherwise (CI logs) it logs every 10%.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._tty = sys.stderr.isatty()
+        self._phase = None
+        self._pct = -1
+
+    def __call__(self, phase: str, done: int, total: int):
+        pct = done * 100 // total if total else 100
+        with self._lock:
+            if phase == self._phase and pct == self._pct:
+                return
+            if not self._tty:
+                if phase != self._phase or pct >= self._pct + 10 or pct == 100:
+                    logger.info("  %s %3d%% (%d/%d B)", phase, pct, done, total)
+                    self._phase, self._pct = phase, pct
+                return
+            if self._phase and phase != self._phase:
+                sys.stderr.write("\n")
+            self._phase, self._pct = phase, pct
+            sys.stderr.write(f"\r  {phase:<8} {pct:3d}%  ({done}/{total} B)")
+            sys.stderr.flush()
+
+    def done(self):
+        """Terminates the progress line."""
+        with self._lock:
+            if self._tty and self._phase:
+                sys.stderr.write("\n")
+                sys.stderr.flush()
+
+
+def handle_h2h(args):
+    """Reads or programs the Prolific PL27A1 H2H bridge SPI flash over RPC.
+
+    Everything goes over the device's "Maui RPC" CDC-ACM interface, so the
+    shell port may be busy (e.g. open in a terminal). Writing erases the whole
+    flash, programs the image and verifies it with a CRC-32 read back on the
+    MCU side; reading streams the flash back from offset 0.
+    """
+    image = None
+    if args.file:
+        try:
+            with open(args.file, "rb") as f:
+                image = f.read()
+        except OSError as e:
+            raise RuntimeError(f"Cannot read H2H image: {e}") from e
+
+    rpc_port = args.rpc_port or find_rpc_port(
+        serial_number=args.serial, console_port=args.port
+    )
+    logger.info("Using RPC port %s", rpc_port)
+
+    with RpcClient(rpc_port) as rpc:
+        flasher = H2hFlasher(rpc)
+
+        if args.read:
+            flasher.check_supported("h2h_read_begin")
+            _h2h_read(flasher, args.read, args.size)
+            return
+
+        flasher.check_supported()
+
+        if args.info:
+            logger.info("H2H flash: %s", flasher.info())
+            return
+
+        logger.info(
+            "Flashing %s (%d B, CRC-32 0x%08X) to the H2H SPI flash...",
+            args.file,
+            len(image),
+            zlib.crc32(image) & 0xFFFFFFFF,
+        )
+        printer = _H2hProgressPrinter()
+        try:
+            result = flasher.flash(image, progress=printer)
+        finally:
+            printer.done()
+
+    logger.info(
+        "H2H flash programmed and verified: %s, %d B in %.1f s "
+        "(device %.1f s, %.0f KB/s)",
+        result.info,
+        result.image_size,
+        result.host_s,
+        result.device_ms / 1000.0,
+        result.image_size / 1024.0 / max(result.host_s, 1e-3),
+    )
+
+
+def _h2h_read(flasher, out_file, size):
+    """Dumps the first `size` bytes of the H2H SPI flash to out_file."""
+    printer = _H2hProgressPrinter()
     try:
-        logger.info("Acquiring H2H SPI flash bus...")
-        resp = device.send_command("h2h_flash enable")
-        logger.info("h2h_flash enable: %s", resp)
-
-        status_resp = device.send_command("h2h_flash status")
-        logger.info("h2h_flash status:\n%s", status_resp)
-
-        if getattr(args, "erase", False):
-            logger.info("Erasing H2H SPI flash sector 0...")
-            erase_resp = device.send_command("h2h_flash erase 0x0 4096")
-            logger.info("h2h_flash erase: %s", erase_resp)
-
-        if getattr(args, "file", None):
-            logger.info(
-                "H2H flash image provided (%s). Use SPI flasher or shell "
-                "stream to write.",
-                args.file,
-            )
+        result = flasher.read(size, progress=printer)
     finally:
-        logger.info("Releasing H2H SPI flash bus back to PL27A1...")
-        rel_resp = device.send_command("h2h_flash disable")
-        logger.info("h2h_flash disable: %s", rel_resp)
+        printer.done()
+
+    try:
+        with open(out_file, "wb") as f:
+            f.write(result.data)
+    except OSError as e:
+        raise RuntimeError(f"Cannot write {out_file}: {e}") from e
+
+    logger.info(
+        "H2H flash dumped to %s: %s, %d B (CRC-32 0x%08X) in %.1f s (%.0f KB/s)",
+        out_file,
+        result.info,
+        len(result.data),
+        zlib.crc32(result.data) & 0xFFFFFFFF,
+        result.host_s,
+        len(result.data) / 1024.0 / max(result.host_s, 1e-3),
+    )
 
 
 def handle_serial_cmd(device, args):
@@ -603,16 +702,41 @@ def main():
     # H2H subcommand
     h2h_parser = subparsers.add_parser(
         "h2h",
-        help="Manage or update Prolific PL27A1 Host-to-Host (H2H) bridge SPI flash",
+        help="Read or program the Prolific PL27A1 H2H bridge SPI flash",
     )
-    h2h_parser.add_argument(
+    h2h_group = h2h_parser.add_mutually_exclusive_group(required=True)
+    h2h_group.add_argument(
         "--file",
-        help="Path to local H2H SPI flash binary file",
+        help=(
+            "Raw H2H SPI flash image (.bin, programmed at offset 0; the whole "
+            "flash is erased first)"
+        ),
+    )
+    h2h_group.add_argument(
+        "--info",
+        action="store_true",
+        help="Only print the H2H SPI flash JEDEC ID and size",
+    )
+    h2h_group.add_argument(
+        "--read",
+        metavar="OUT_FILE",
+        help=(
+            "Dump the H2H SPI flash from offset 0 to OUT_FILE (the H2H bridge "
+            "is held in reset while reading)"
+        ),
     )
     h2h_parser.add_argument(
-        "--erase",
-        action="store_true",
-        help="Erase first 4KB sector of H2H SPI flash",
+        "--size",
+        type=int,
+        default=H2H_IMAGE_SIZE,
+        help=(
+            f"Number of bytes to dump with --read (default: {H2H_IMAGE_SIZE}, "
+            "the size of a PL27A1 image)"
+        ),
+    )
+    h2h_parser.add_argument(
+        "--rpc-port",
+        help="RPC port of the device (default: auto-detect the 'Maui RPC' port)",
     )
 
     # Serial Number (NVS) subcommand
@@ -648,6 +772,11 @@ def main():
         sys.exit(1)
 
     # Main Execution Logic
+    # H2H talks only to the RPC port; don't require (or open) the shell port.
+    if args.component == "h2h":
+        handle_h2h(args)
+        return
+
     device = None
     try:
         device = MauiDevice.find_device(serial_number=args.serial, port=args.port)
@@ -662,9 +791,6 @@ def main():
 
         elif args.component == "mcu":
             handle_mcu_update(device, args)
-
-        elif args.component == "h2h":
-            handle_h2h_update(device, args)
 
         elif args.component == "serial":
             handle_serial_cmd(device, args)
@@ -681,6 +807,9 @@ if __name__ == "__main__":
     except RuntimeError as e:
         logger.error("Command failed: %s", e)
         sys.exit(1)
+    except KeyboardInterrupt:
+        logger.error("Interrupted")
+        sys.exit(130)
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.critical("An unexpected error occurred: %s", e, exc_info=True)
         sys.exit(1)

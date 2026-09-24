@@ -141,6 +141,23 @@ Depending on your board hardware:
 ./tools/scripts/maui-flash mcu --fw_channel stable
 ```
 
+#### H2H Bridge SPI Flash (IT82002)
+
+Programs the Prolific PL27A1 SPI flash through the MCU over the "Maui RPC"
+interface (whole-chip erase, program, CRC-32 verify on the MCU):
+```bash
+./tools/scripts/maui-flash --serial <SERIAL> h2h --file /path/to/pl27a1.bin
+./tools/scripts/maui-flash --serial <SERIAL> h2h --info
+```
+
+Dump the current image over the same RPC interface (default 8704 B, the PL27A1
+configuration size). The H2H bridge is held in reset and drops off USB while
+reading:
+```bash
+./tools/scripts/maui-flash --serial <SERIAL> h2h --read h2h_dump.bin
+./tools/scripts/maui-flash --serial <SERIAL> h2h --read full.bin --size 524288
+```
+
 ## Transport & Device Discovery Architecture
 
 The `maui_libs.transport` module manages low-level serial communication and handles hardware differences across board phases:
@@ -159,6 +176,9 @@ The `maui_libs.transport` module manages low-level serial communication and hand
     *   `transport.py`: Low-level serial communication, prompt parsing, and device scanning.
     *   `device.py`: High-level `MauiDevice` abstraction.
     *   `pdc.py`: Logic for PDC firmware updates.
+    *   `rpc.py`: Client for the IT82002 "Maui RPC" channel (COBS + Protobuf, `firmware/proto/maui_rpc.proto`).
+    *   `h2h.py`: H2H bridge SPI flash reading and programming over RPC.
+    *   `proto/`: Generated Protobuf modules; regenerate with `tools/scripts/gen_proto.sh`.
     *   `cli.py`: Common CLI argument parsing and logging setup.
 *   `tools/src/`: CLI entry points (`maui_ctl.py`, `maui_flash.py`).
 *   `tools/tests/`: Unit tests.
