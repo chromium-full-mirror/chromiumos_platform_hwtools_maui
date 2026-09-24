@@ -1,0 +1,134 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// Maui machine-to-machine RPC protocol (go/maui-ite-design, "Host Automation
+// & Machine Interface").
+//
+// TRANSPORT
+//   The second USB CDC-ACM interface of the Application, whose USB interface
+//   string is "Maui RPC" (typically /dev/ttyACM1). Each message is one
+//   serialized Envelope, COBS-encoded and terminated by a single 0x00. Empty
+//   frames (consecutive 0x00) are ignored on both sides: the host sends one to
+//   resynchronize, and the firmware also starts every frame with a 0x00 so a
+//   frame that was cut short never corrupts the next one.
+//
+// FLOW
+//   Request  -> host picks a non-zero seq; exactly one Response echoes it.
+//   Event    -> unsolicited firmware notification, seq = 0. Events carry an
+//               MCU timestamp and their own event_seq; they are dropped rather
+//               than delay the firmware, so a gap in event_seq means a loss.
+//   The firmware handles requests strictly in order, so a host may pipeline
+//   several requests and match the responses by seq.
+//
+// EXTENDING
+//   Messages are grouped by functional domain. Every domain owns a block of
+//   field numbers in Request, Response and Event (see the table below) so
+//   domains can grow independently without renumbering. To add a call:
+//     1. Define <Name>Request / <Name>Response in the domain section.
+//     2. Add them to the Request/Response oneofs inside the domain's block.
+//     3. Firmware: RPC_HANDLER_DEFINE(...) in the domain's src/rpc/rpc_*.c.
+//     4. Host:    add a method to the domain's service in tools/maui_libs.
+//   The host discovers what a firmware supports through
+//   PingResponse.supported_requests, so new host tools degrade gracefully on
+//   older firmware.
+//
+//   Field-number blocks (Request / Response / Event oneofs). All numbers up to
+//   2047 encode in two bytes, so the wide blocks cost nothing on the wire:
+//        1 -  99  common fields (status/error in Response, timestamp in Event)
+//      100 - 199  system    (ping, version, reboot, ...)
+//      200 - 299  h2h       (Prolific PL27A1 SPI flash)
+//      300 - 399  pdc       (TPS66994 control, FW update)      [planned]
+//      400 - 499  mux       (SBU / host / H2H muxes)            [planned]
+//      500 - 599  adc       (rail and CC voltages)             [planned]
+//      600 - 699  thermal   (TMP110)                           [planned]
+//      700 - 799  stats     (persistent lifetime statistics)   [planned]
+//      800 - 899  gpio/led                                     [planned]
+//      900 - 999  storage   (serial number, NVS)               [planned]
+//   Every Request has a Response message of the same name and number, even if
+//   it is empty today, so fields can be added later without breaking anyone.
+//
+// This file is shared by the firmware (Nanopb, generated at build time) and the
+// host tools (tools/maui_libs/proto/maui_rpc_pb2.py, checked in). Regenerate
+// the Python module with tools/scripts/gen_proto.sh after editing.
+
+syntax = "proto3";
+
+package maui.rpc;
+
+// Bumped only on incompatible changes. Adding messages is compatible.
+enum ProtocolVersion {
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_CURRENT = 1;
+}
+
+enum Status {
+  STATUS_OK = 0;
+  STATUS_ERROR = 1;
+  STATUS_INVALID_ARGUMENT = 2;
+  STATUS_BAD_STATE = 3;
+  STATUS_IO_ERROR = 4;
+  STATUS_VERIFY_FAILED = 5;
+  STATUS_UNSUPPORTED = 6;
+  STATUS_TOO_LARGE = 7;
+  STATUS_BUSY = 8;
+  STATUS_TIMEOUT = 9;
+  STATUS_NOT_FOUND = 10;
+  STATUS_ABORTED = 11;
+}
+
+// ---------------------------------------------------------------------------
+// system (100 - 199)
+// ---------------------------------------------------------------------------
+
+message PingRequest {
+  uint32 token = 1;
+}
+
+message PingResponse {
+  uint32 token = 1;
+  uint32 protocol_version = 2;
+  string fw_version = 3;
+  // Request oneof field numbers this firmware implements.
+  repeated uint32 supported_requests = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Envelope
+// ---------------------------------------------------------------------------
+
+message Request {
+  oneof msg {
+    // system
+    PingRequest ping = 100;
+  }
+}
+
+message Response {
+  Status status = 1;
+  // Short human-readable reason when status != STATUS_OK.
+  string error = 2;
+  // Negative Zephyr errno behind a failure, when there is one.
+  sint32 error_code = 3;
+  oneof msg {
+    // system
+    PingResponse ping = 100;
+  }
+}
+
+message Event {
+  // MCU uptime when the event was generated.
+  uint64 timestamp_ms = 1;
+  // Increments for every event the firmware generates, sent or dropped.
+  uint32 event_seq = 2;
+  // No events yet; domains add their notifications to a oneof here.
+}
+
+message Envelope {
+  uint32 seq = 1;
+  oneof kind {
+    Request request = 2;
+    Response response = 3;
+    Event event = 4;
+  }
+}

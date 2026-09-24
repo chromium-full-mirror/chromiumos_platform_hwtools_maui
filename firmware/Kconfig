@@ -117,4 +117,48 @@ config MAUI_HEALTH_FLASH_DIAGNOSTICS
 	  Turn this off for production images. 'health status' stays available
 	  and reports the same protection state non-destructively.
 
+menuconfig MAUI_RPC
+	bool "Machine-to-machine RPC over a second USB CDC-ACM interface"
+	select NANOPB
+	select COBS
+	select RING_BUFFER
+	help
+	  Exposes a second CDC-ACM interface ("Maui RPC") that carries
+	  COBS-framed Nanopb messages defined in proto/maui_rpc.proto, for
+	  host automation and maui-flash (go/maui-ite-design). Needs a
+	  'cdc_acm_uart1' devicetree node, the nanopb west module,
+	  USB_DEVICE_STACK_NEXT and UART_INTERRUPT_DRIVEN.
+
+if MAUI_RPC
+
+config MAUI_RPC_RX_BUF_SIZE
+	int "RX ring buffer size"
+	default 16384
+	help
+	  Bytes buffered between the USB callback and the RPC thread. Large
+	  enough for several maximum-size frames so the host can pipeline
+	  requests while a handler (e.g. a flash write) is running.
+
+config MAUI_RPC_TX_BUF_SIZE
+	int "TX ring buffer size"
+	default 2048
+
+config MAUI_RPC_TX_TIMEOUT_MS
+	int "Give up sending after the host stops reading for this long (ms)"
+	default 1000
+
+config MAUI_RPC_STACK_SIZE
+	int "RPC thread stack size"
+	default 3072
+
+config MAUI_RPC_THREAD_PRIORITY
+	int "RPC thread priority"
+	default 10
+
+module = MAUI_RPC
+module-str = maui_rpc
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # MAUI_RPC
+
 source "Kconfig.zephyr"

@@ -1,0 +1,28 @@
+/* Copyright 2026 The ChromiumOS Authors
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+/*
+ * Application-only devicetree additions for maui_v1p2_it82002.
+ *
+ * Kept out of the board .dts because the MCUboot RO/RW bootloaders build from
+ * that .dts too and must expose only their single serial-recovery interface.
+ * firmware/CMakeLists.txt applies this overlay to every Application build.
+ */
+
+/* Interface strings let host tools tell the two ports apart (pyserial
+ * ListPortInfo.interface) without relying on enumeration order.
+ */
+&cdc_acm_uart0 {
+	label = "Maui Console";
+};
+
+&zephyr_udc0 {
+	/* Machine-to-machine RPC channel (go/maui-ite-design). */
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "Maui RPC";
+		rx-fifo-size = <2048>;
+	};
+};

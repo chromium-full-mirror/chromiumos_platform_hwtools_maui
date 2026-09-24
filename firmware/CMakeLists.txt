@@ -9,8 +9,29 @@ if(NOT DEFINED BOARD)
 	set(BOARD maui_proto_3507)
 endif()
 
+# Application-only devicetree additions live in boards/<board>.overlay. Zephyr
+# applies that file automatically only when DTC_OVERLAY_FILE is unset; the
+# MCUboot build flow sets it (app_mcuboot.overlay), so add it explicitly then.
+set(MAUI_APP_OVERLAY ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD}.overlay)
+if(DEFINED DTC_OVERLAY_FILE AND EXISTS ${MAUI_APP_OVERLAY})
+	list(APPEND EXTRA_DTC_OVERLAY_FILE ${MAUI_APP_OVERLAY})
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(maui)
+
+# Machine-to-machine RPC (second CDC-ACM interface). The core lives in
+# src/rpc/rpc.c; each functional domain adds its own src/rpc/rpc_<domain>.c.
+if(CONFIG_MAUI_RPC)
+	list(APPEND CMAKE_MODULE_PATH ${ZEPHYR_BASE}/modules/nanopb)
+	include(nanopb)
+	zephyr_nanopb_sources(app proto/maui_rpc.proto)
+	zephyr_linker_sources(ROM_SECTIONS src/rpc/rpc_handlers.ld)
+	target_sources(app PRIVATE
+		src/rpc/rpc.c
+		src/rpc/rpc_system.c
+	)
+endif()
 
 # Safely override missing IOMUX definition for 48-pin package in the standard GPIO driver (only for maui_proto_5117)
 if(BOARD STREQUAL "maui_proto_5117")

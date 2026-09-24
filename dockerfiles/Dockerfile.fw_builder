@@ -25,7 +25,9 @@ RUN apt update && apt upgrade -y && apt install -y --no-install-recommends \
   libc6-i386 \
   make \
   ninja-build \
+  protobuf-compiler \
   python3-dev \
+  python3-protobuf \
   python3-pip \
   python3-venv \
   python3-setuptools \
@@ -105,7 +107,8 @@ RUN if [ "$BOARD" = "maui_proto_5117" ] || [ "$BOARD" = "5117" ]; then \
       # Bump this tag deliberately and re-test the it82002 firmware.
       ZEPHYR_BRANCH="v4.4.2"; \
       ZEPHYR_COMMIT=""; \
-      WEST_MODULES="cmsis picolibc mcuboot mbedtls zcbor"; \
+      # nanopb: Protobuf runtime/generator for the ACM1 RPC channel.
+      WEST_MODULES="cmsis picolibc mcuboot mbedtls zcbor nanopb"; \
       FETCH_TI_DEV="false"; \
     else \
       ZEPHYR_REPO="https://github.com/TexasInstruments/msp-zephyr.git"; \

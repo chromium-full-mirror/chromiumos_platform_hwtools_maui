@@ -13,6 +13,9 @@
 #ifdef CONFIG_MAUI_NVS_STORAGE
 #include "nvs_storage.h"
 #endif
+#ifdef CONFIG_MAUI_RPC
+#include "rpc/rpc.h"
+#endif
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
@@ -54,6 +57,13 @@ int main(void)
 		LOG_ERR("Failed to initialize USB (err %d)", ret);
 		led_set_pattern(LED_GREEN, LED_PATTERN_BLINK_FAST);
 	}
+
+#ifdef CONFIG_MAUI_RPC
+	ret = rpc_init();
+	if (ret < 0) {
+		LOG_ERR("Failed to initialize RPC (err %d)", ret);
+	}
+#endif
 
 	LOG_INF("Maui Firmware Initialized Successfully");
 

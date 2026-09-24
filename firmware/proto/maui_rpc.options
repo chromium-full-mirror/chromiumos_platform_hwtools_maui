@@ -1,0 +1,9 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Nanopb options for maui_rpc.proto: bound every variable-length field so the
+# firmware can decode into statically allocated structs.
+maui.rpc.PingResponse.fw_version max_size:64
+maui.rpc.PingResponse.supported_requests max_count:128
+maui.rpc.Response.error max_size:64
