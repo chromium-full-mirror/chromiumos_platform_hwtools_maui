@@ -31,6 +31,7 @@ if(CONFIG_MAUI_RPC)
 		src/rpc/rpc.c
 		src/rpc/rpc_system.c
 	)
+	target_sources_ifdef(CONFIG_MAUI_RPC_H2H app PRIVATE src/rpc/rpc_h2h.c)
 endif()
 
 # Safely override missing IOMUX definition for 48-pin package in the standard GPIO driver (only for maui_proto_5117)

@@ -7,3 +7,5 @@
 maui.rpc.PingResponse.fw_version max_size:64
 maui.rpc.PingResponse.supported_requests max_count:128
 maui.rpc.Response.error max_size:64
+maui.rpc.H2hWriteRequest.data max_size:4096
+maui.rpc.H2hReadResponse.data max_size:4096

@@ -94,6 +94,99 @@ message PingResponse {
 }
 
 // ---------------------------------------------------------------------------
+// h2h (200 - 299): reading and programming the SPI flash of the Prolific
+// PL27A1 bridge.
+//
+// Write session: H2hBegin (acquire bus, full-chip erase) -> H2hWrite x N
+// (strictly sequential offsets, each chunk <= max_chunk_size) -> H2hFinish
+// (the MCU reads the flash back and checks CRC-32 against image_crc32, then
+// returns the bus to the PL27A1).
+//
+// Read session: H2hReadBegin (acquire bus) -> H2hRead x N (any offset, each
+// chunk <= max_chunk_size, within the flash) -> H2hReadEnd (return the bus to
+// the PL27A1).
+//
+// The PL27A1 is held in reset for the whole session. Only one session exists
+// at a time; starting one ends any other. H2hAbort, any failed request, or
+// CONFIG_MAUI_RPC_H2H_IDLE_TIMEOUT_MS of inactivity ends the session and
+// releases the bus. H2hProgressEvent reports long-running phases.
+// CRC-32 is IEEE 802.3 (zlib.crc32).
+// ---------------------------------------------------------------------------
+
+enum H2hPhase {
+  H2H_PHASE_UNSPECIFIED = 0;
+  H2H_PHASE_ERASE = 1;
+  H2H_PHASE_PROGRAM = 2;  // Tracked by the host from its own writes.
+  H2H_PHASE_VERIFY = 3;
+}
+
+message H2hInfoRequest {}
+
+message H2hInfoResponse {
+  // JEDEC ID as 0xMMTTCC (manufacturer, type, capacity).
+  uint32 jedec_id = 1;
+  uint32 flash_size = 2;
+}
+
+message H2hBeginRequest {
+  uint32 image_size = 1;
+  uint32 image_crc32 = 2;
+}
+
+message H2hBeginResponse {
+  uint32 jedec_id = 1;
+  uint32 flash_size = 2;
+  uint32 max_chunk_size = 3;
+}
+
+message H2hWriteRequest {
+  uint32 offset = 1;
+  bytes data = 2;
+}
+
+message H2hWriteResponse {}
+
+message H2hFinishRequest {}
+
+message H2hFinishResponse {
+  uint32 flash_crc32 = 1;
+  // From H2hBegin to the end of verification.
+  uint32 duration_ms = 2;
+}
+
+message H2hAbortRequest {}
+
+message H2hAbortResponse {}
+
+message H2hReadBeginRequest {}
+
+message H2hReadBeginResponse {
+  uint32 jedec_id = 1;
+  uint32 flash_size = 2;
+  uint32 max_chunk_size = 3;
+}
+
+message H2hReadRequest {
+  uint32 offset = 1;
+  uint32 length = 2;
+}
+
+message H2hReadResponse {
+  uint32 offset = 1;
+  bytes data = 2;
+}
+
+message H2hReadEndRequest {}
+
+message H2hReadEndResponse {}
+
+message H2hProgressEvent {
+  H2hPhase phase = 1;
+  uint32 done = 2;
+  uint32 total = 3;
+}
+
+// ---------------------------------------------------------------------------
 // Envelope
 // ---------------------------------------------------------------------------
 
@@ -101,6 +194,15 @@ message Request {
   oneof msg {
     // system
     PingRequest ping = 100;
+    // h2h
+    H2hBeginRequest h2h_begin = 200;
+    H2hWriteRequest h2h_write = 201;
+    H2hFinishRequest h2h_finish = 202;
+    H2hAbortRequest h2h_abort = 203;
+    H2hInfoRequest h2h_info = 204;
+    H2hReadBeginRequest h2h_read_begin = 205;
+    H2hReadRequest h2h_read = 206;
+    H2hReadEndRequest h2h_read_end = 207;
   }
 }
 
@@ -113,6 +215,15 @@ message Response {
   oneof msg {
     // system
     PingResponse ping = 100;
+    // h2h
+    H2hBeginResponse h2h_begin = 200;
+    H2hWriteResponse h2h_write = 201;
+    H2hFinishResponse h2h_finish = 202;
+    H2hAbortResponse h2h_abort = 203;
+    H2hInfoResponse h2h_info = 204;
+    H2hReadBeginResponse h2h_read_begin = 205;
+    H2hReadResponse h2h_read = 206;
+    H2hReadEndResponse h2h_read_end = 207;
   }
 }
 
@@ -121,7 +232,10 @@ message Event {
   uint64 timestamp_ms = 1;
   // Increments for every event the firmware generates, sent or dropped.
   uint32 event_seq = 2;
-  // No events yet; domains add their notifications to a oneof here.
+  oneof msg {
+    // h2h
+    H2hProgressEvent h2h_progress = 200;
+  }
 }
 
 message Envelope {

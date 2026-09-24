@@ -117,6 +117,16 @@ config MAUI_HEALTH_FLASH_DIAGNOSTICS
 	  Turn this off for production images. 'health status' stays available
 	  and reports the same protection state non-destructively.
 
+config MAUI_H2H_SPI_FREQUENCY
+	int "SPI clock for the Prolific PL27A1 H2H flash (Hz)"
+	default 12000000
+	help
+	  Must be an exact divisor (/1, /2 ... /16) of the SSPI source clock
+	  on IT8xxx2, otherwise transfers fail with -ENOTSUP.
+	  TODO: 12 MHz is the conservative choice. Try 24 MHz on real hardware
+	  (signal integrity of the mux path); it would shorten program and
+	  verify by roughly 10% for a 1 MB image.
+
 menuconfig MAUI_RPC
 	bool "Machine-to-machine RPC over a second USB CDC-ACM interface"
 	select NANOPB
@@ -154,6 +164,25 @@ config MAUI_RPC_STACK_SIZE
 config MAUI_RPC_THREAD_PRIORITY
 	int "RPC thread priority"
 	default 10
+
+config MAUI_RPC_H2H
+	bool "RPC h2h domain: read and program the PL27A1 bridge SPI flash"
+	default y
+	depends on MAUI_H2H_FLASH
+	select CRC
+	help
+	  H2hBegin/Write/Finish, H2hReadBegin/Read/ReadEnd, H2hAbort and
+	  H2hInfo requests, used by 'maui-flash h2h'. See the h2h section of
+	  proto/maui_rpc.proto.
+
+config MAUI_RPC_H2H_IDLE_TIMEOUT_MS
+	int "Release the H2H SPI bus after an idle session (ms)"
+	depends on MAUI_RPC_H2H
+	default 10000
+	help
+	  If the host stops sending requests in the middle of an H2H read or
+	  flashing session (e.g. it crashed), the session is ended and the SPI
+	  flash is handed back to the PL27A1 after this long.
 
 module = MAUI_RPC
 module-str = maui_rpc
