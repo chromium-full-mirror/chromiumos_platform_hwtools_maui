@@ -167,14 +167,15 @@ BUILD_ASSERT((0x38000U % IT8XXX2_EWPR_REG_SPAN) == 0,
 #define EWPR_REGS_RECOVERY EWPR_REGS_BOTH_LOADERS
 #endif
 
-/* Write-protect flash [0, reg_count * 32 KB) against EC, Host and Debugger
- * writes. */
+/* Write-protect flash [0, reg_count * 32 KB) against EC writes.
+ * Host (eSPI/LPC) and Debugger paths remain unlocked (0x00) so external
+ * programmers and the host can always modify flash. */
 static void it82002_flash_protect(unsigned int reg_count)
 {
 	for (unsigned int i = 0; i < reg_count; i++) {
 		IT83XX_GCTRL_EWPR0PFEC(i) = 0xFF;
-		IT83XX_GCTRL_EWPR0PFH(i) = 0xFF;
-		IT83XX_GCTRL_EWPR0PFD(i) = 0xFF;
+		IT83XX_GCTRL_EWPR0PFH(i) = 0x00;
+		IT83XX_GCTRL_EWPR0PFD(i) = 0x00;
 	}
 }
 
@@ -190,10 +191,10 @@ static void it82002_flash_protect(unsigned int reg_count)
  * scratch. That is what makes freezing safe: any reset returns the chip to a
  * programmable state, so reflashing a bootloader never needs a power cycle.
  *
- * Fail-safe: only freeze after reading back all three register files (EC, Host
- * and Debugger paths) as fully set. Freezing a partially programmed register
- * file would leave flash unprotected AND unprotectable until the next reset,
- * which is strictly worse than not freezing at all.
+ * Fail-safe: only freeze after reading back the EC register file (EWPRxPFEC)
+ * as fully set. Freezing a partially programmed register file would leave
+ * flash unprotected AND unprotectable until the next reset, which is strictly
+ * worse than not freezing at all.
  *
  * Idempotent: a second call from a later stage just re-ORs a bit that is
  * already set, and the read-back above still passes because the registers are
@@ -202,9 +203,7 @@ static void it82002_flash_protect(unsigned int reg_count)
 static void it82002_flash_protect_lock(unsigned int reg_count)
 {
 	for (unsigned int i = 0; i < reg_count; i++) {
-		if (IT83XX_GCTRL_EWPR0PFEC(i) != 0xFF ||
-		    IT83XX_GCTRL_EWPR0PFH(i) != 0xFF ||
-		    IT83XX_GCTRL_EWPR0PFD(i) != 0xFF) {
+		if (IT83XX_GCTRL_EWPR0PFEC(i) != 0xFF) {
 			return;
 		}
 	}
