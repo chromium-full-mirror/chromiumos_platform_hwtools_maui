@@ -13,8 +13,8 @@
 LOG_MODULE_REGISTER(host_mux);
 
 /* Mux Selection States */
-#define MUX_SEL_NORMAL 0
-#define MUX_SEL_FLIP 1
+#define MUX_SEL_NORMAL (IS_ENABLED(CONFIG_HOST_MUX_SEL_INVERTED) ? 1 : 0)
+#define MUX_SEL_FLIP (IS_ENABLED(CONFIG_HOST_MUX_SEL_INVERTED) ? 0 : 1)
 
 /*
  * VBUS threshold (4.0V minimum for valid USB VBUS)

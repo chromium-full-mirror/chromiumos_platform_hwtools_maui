@@ -169,10 +169,10 @@
 			/* Pin A12: SMDAT5/GPE2 -> USB3_MUX_HOST_OE_R_L
 			 *
 			 * Active-low output-enable for the USB3 host mux.
-			 * Boots asserted so the mux drives from reset: with
-			 * host_mux disabled on this board (CONFIG_MAUI_HOST_MUX)
-			 * nothing else ever enables it, and a disabled buffer
-			 * leaves the USB3 host path dead.
+			 * Boots asserted so the mux drives from reset, which is
+			 * what the bootloaders (and any image built without
+			 * CONFIG_MAUI_HOST_MUX) rely on. In the App, host_mux
+			 * takes over and drives it from the Host CC/VBUS state.
 			 */
 			gpios = <&gpioe 2 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
 		};

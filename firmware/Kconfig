@@ -41,19 +41,26 @@ config HOST_MUX_HIGH_THRESH
 	int "Lower voltage threshold to treat signal as high (millivolts)"
 	default 200
 
+config HOST_MUX_SEL_INVERTED
+	bool "USB3 host mux SEL polarity is inverted"
+	default y if BOARD_MAUI_V1P2_IT82002
+	help
+	  By default USB3_MUX_HOST_SEL is driven low for CC1 (normal) and high
+	  for CC2 (flipped) orientation. Enable this on boards where the mux
+	  is wired the other way round, so CC1 drives SEL high and CC2 drives
+	  it low. maui_v1p2_it82002 needs this (verified on hardware).
+
 config MAUI_HOST_MUX
 	bool "Automatic USB host mux / hub control"
-	default n if SOC_IT82002AW
 	default y
 	help
 	  Polls the Host CC lanes and drives HUB_RESET_L and the USB3 host mux
 	  select/output-enable lines accordingly.
 
-	  Disabled on maui_v1p2_it82002 for bring-up: the EC's own USB device
-	  reaches the host through that hub, so a mis-detected CC state takes
-	  the console and the firmware-update path down with it. With this off
-	  the mux and hub keep the boot states configured in the board
-	  devicetree, which are the states we want for bring-up anyway.
+	  On maui_v1p2_it82002 the EC's own USB device reaches the host through
+	  that hub, so a mis-detected CC state also takes down the console and
+	  the firmware-update path. Recovery then needs the RO/RW bootloaders,
+	  which do not run this module.
 
 config MAUI_H2H_FLASH
 	bool "H2H bridge (PL27A1) SPI flash access"
