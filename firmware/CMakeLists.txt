@@ -39,12 +39,15 @@ if(CONFIG_MAUI_HOST_MUX)
 	target_sources(app PRIVATE src/host_mux.c)
 endif()
 
+if(CONFIG_MAUI_H2H_FLASH)
+	target_sources(app PRIVATE src/h2h_flash.c)
+endif()
+
 target_sources(app PRIVATE
 	src/bypass.c
 	src/commands.c
 	src/gpio.c
 	src/gpio_shell.c
-	src/h2h_flash.c
 	src/hwrev.c
 	src/led.c
 	src/main.c

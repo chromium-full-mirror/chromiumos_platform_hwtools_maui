@@ -55,6 +55,16 @@ config MAUI_HOST_MUX
 	  the mux and hub keep the boot states configured in the board
 	  devicetree, which are the states we want for bring-up anyway.
 
+config MAUI_H2H_FLASH
+	bool "H2H bridge (PL27A1) SPI flash access"
+	default y if BOARD_MAUI_V1P2_IT82002
+	depends on SPI
+	help
+	  Lets the MCU take over the PL27A1 H2H bridge's SPI flash (holding the
+	  bridge in reset and switching the flash mux) and adds the h2h_flash
+	  shell commands. Only boards with the EC-side SPI bus and flash mux
+	  wired up support this.
+
 config GPIO_INIT_PRIORITY
 	int "GPIO subsystem init priority"
 	default 89
