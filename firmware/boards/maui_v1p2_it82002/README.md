@@ -445,7 +445,9 @@ write-protection only to stop *accidents*, not attacks.
 *   **Image versions are all `1.0.0`.** Direct-XIP otherwise picks the slot with
     the highest version; ties keep the first candidate. Do not rely on this —
     the slot hook now makes it moot for RO.
-*   **Do not use GPJ6 (`EC_BSL_INVOKE`)** for recovery entry on this board.
+*   **Do not use GPJ6 (`EC_BSL_INVOKE`)** for recovery entry on this board. The
+    App only exposes it as a plain input (`gpio get ec_bsl_invoke`); the
+    bootloaders ignore it (`CONFIG_BOOT_SERIAL_ENTRANCE_GPIO=n`).
 *   **A version-string mismatch after flashing always means the bytes never
     reached the chip.** The 1 MB image contains exactly one version string and
     there is no secondary slot to hide a stale copy in.

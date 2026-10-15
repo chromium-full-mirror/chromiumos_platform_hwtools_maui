@@ -189,6 +189,16 @@
 			gpios = <&gpiof 7 (GPIO_INPUT | GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 		};
 
+		ec_bsl_invoke: ec_bsl_invoke {
+			/*
+			 * Pin F2: GPJ6 -> EC_BSL_INVOKE.
+			 * Monitor only ('gpio get ec_bsl_invoke'); nothing acts on
+			 * it, and the bootloaders do not use it for recovery entry.
+			 * No internal pull, so the board net is read as-is.
+			 */
+			gpios = <&gpioj 6 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
 		/* H2H Prolific PL27A1 Access LED Indicators */
 		h2h_host_access_led_l: h2h_host_access_led_l {
 			/* Pin H4: KBRST#/GPB6 -> H2H_HOST_ACCESS_LED_L */
