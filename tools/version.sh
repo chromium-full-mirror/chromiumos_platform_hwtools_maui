@@ -25,7 +25,7 @@ fi
 if git rev-parse --git-dir > /dev/null 2>&1; then
     GIT_COMMIT_COUNT=$(git rev-list --count HEAD)
     GIT_SHORT_HASH=$(git rev-parse --short HEAD)
-    GIT_DIRTY=$(git diff --quiet || echo "-dirty")
+    GIT_DIRTY=$(git diff --quiet -- . || echo "-dirty")
 else
     GIT_COMMIT_COUNT=0
     GIT_SHORT_HASH="unknown"

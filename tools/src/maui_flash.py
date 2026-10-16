@@ -33,9 +33,16 @@ from maui_libs.pdc import MauiPdcClientAdapter
 from maui_libs.pdc import Tps6699xFirmwareUpdater
 from maui_libs.rpc import find_rpc_port
 from maui_libs.rpc import RpcClient
+from maui_libs.transport import DEVICE_TYPE_PROTO
+from maui_libs.transport import DEVICE_TYPE_V11
+from maui_libs.transport import DEVICE_TYPE_V12
+from maui_libs.transport import ITE_DEVICE_TYPES
+from maui_libs.transport import list_maui_devices
 from maui_libs.transport import MAUI_FINAL_PID
 from maui_libs.transport import MAUI_FINAL_VID
 from maui_libs.transport import MAUI_IT82002_BOOTLOADER_PID
+from maui_libs.transport import MSPM0_DEVICE_TYPES
+from maui_libs.transport import VALID_DEVICE_TYPES
 import serial
 import serial.tools.list_ports
 
@@ -46,118 +53,213 @@ logger = logging.getLogger(__name__)
 GCS_BASE_URL = "https://storage.googleapis.com/maui-firmware"
 
 
-def _resolve_tag_to_dir(
-    version: str, component: str, comp_dir: str, tag_suffix: str
+def _list_gcs_keys(prefix: str) -> list[str]:
+    """Lists all object keys in GCS matching the given prefix."""
+    list_url = f"{GCS_BASE_URL}?prefix={prefix}"
+    with urllib.request.urlopen(list_url) as response:
+        xml_content = response.read()
+    root = ET.fromstring(xml_content)
+    keys = []
+    for child in root:
+        if child.tag.endswith("Contents"):
+            for sub in child:
+                if sub.tag.endswith("Key") and sub.text:
+                    keys.append(sub.text)
+                    break
+    return keys
+
+
+def _get_comp_subdir(component: str, device_type: str) -> str:
+    """Returns the GCS firmware subdirectory for a component and device type."""
+    if device_type not in VALID_DEVICE_TYPES:
+        raise RuntimeError(
+            f"Unknown device type '{device_type}'. "
+            f"Specify one of {VALID_DEVICE_TYPES} via --device_type."
+        )
+    if component == "mcu":
+        return "mspm0" if device_type in MSPM0_DEVICE_TYPES else device_type
+    if device_type in (DEVICE_TYPE_V11, DEVICE_TYPE_V12):
+        return "v11_v12"
+    return device_type
+
+
+def _match_tag_key(
+    keys: list[str],
+    version: str,
+    component: str,
+    tag_suffix: str,
+    device_type: str,
 ) -> str:
-    """Resolves a version tag to a directory key in GCS."""
-    list_url = f"{GCS_BASE_URL}?prefix={comp_dir}/"
-    logger.info("Resolving tag '%s' by listing %s...", version, list_url)
+    """Finds the matching tag marker key in GCS by priority."""
+    comp_dir = f"{component}-fw"
+    group_sub = _get_comp_subdir(component, device_type)
+    plain_marker = f"/{version}{tag_suffix}"
 
+    # 1. Device-specific or group-specific marker anywhere under comp_dir/
+    for suffix in (
+        f"/{version}.{device_type}{tag_suffix}",
+        f"/{version}.{group_sub}{tag_suffix}",
+    ):
+        for key in keys:
+            if key.endswith(suffix):
+                return key
+
+    # 2. Plain marker inside comp_dir/<device_or_group>/
+    for sub in (device_type, group_sub):
+        sub_prefix = f"{comp_dir}/{sub}/"
+        for key in keys:
+            if key.startswith(sub_prefix) and key.endswith(plain_marker):
+                return key
+
+    # 3. Legacy un-scoped marker fallback ONLY for compatible devices
+    allow_legacy = (component == "mcu" and device_type in MSPM0_DEVICE_TYPES) or (
+        component == "pdc" and device_type == DEVICE_TYPE_PROTO
+    )
+    if allow_legacy:
+        for key in keys:
+            if key.endswith(plain_marker) and key.count("/") == 2:
+                logger.warning("Using legacy tag '%s'", key)
+                return key
+
+    raise RuntimeError(
+        f"Tag '{version}' not found for {component} (device: {device_type}). "
+        f"Expected marker '{version}.{device_type}{tag_suffix}' in {comp_dir}/."
+    )
+
+
+def _resolve_tag_to_dir(
+    version: str,
+    component: str,
+    comp_dir: str,
+    tag_suffix: str,
+    device_type: str = DEVICE_TYPE_PROTO,
+) -> str:
+    """Resolves a channel tag ('stable', 'alpha', 'prev') to a directory key in GCS."""
+    logger.info(
+        "Resolving %s tag '%s' for device '%s' in %s/...",
+        component,
+        version,
+        device_type,
+        comp_dir,
+    )
     try:
-        with urllib.request.urlopen(list_url) as response:
-            xml_content = response.read()
-
-        # Parse XML.
-        root = ET.fromstring(xml_content)
-
-        found_key = None
-        for child in root:
-            if child.tag.endswith("Contents"):
-                key_elem = None
-                for sub in child:
-                    if sub.tag.endswith("Key"):
-                        key_elem = sub
-                        break
-
-                if key_elem is not None:
-                    key = key_elem.text
-                    if key.endswith(f"/{version}{tag_suffix}"):
-                        found_key = key
-                        break
-
-        if not found_key:
-            raise RuntimeError(f"Tag '{version}' not found for {component}")
-
-        # Found key: pdc-fw/v10_122/stable.pdcfw
-        # Parent dir: pdc-fw/v10_122
+        keys = _list_gcs_keys(f"{comp_dir}/")
+        found_key = _match_tag_key(keys, version, component, tag_suffix, device_type)
         target_dir_key = os.path.dirname(found_key)
         logger.info("Tag '%s' resolves to: %s", version, target_dir_key)
         return target_dir_key
-
     except Exception as e:
         raise RuntimeError(f"Failed to resolve tag '{version}': {e}") from e
 
 
-def _find_binary_in_dir(target_dir_key: str, file_ext: str) -> str:
+def _find_binary_in_dir(
+    target_dir_key: str,
+    file_ext: str,
+    preferred_name: str = None,
+    target_stage: str = "app",
+) -> str:
     """Finds the firmware binary in the specified directory key."""
-    bin_url = ""
     try:
-        list_url = f"{GCS_BASE_URL}?prefix={target_dir_key}/"
-        with urllib.request.urlopen(list_url) as response:
-            xml_content = response.read()
-
-        root = ET.fromstring(xml_content)
-
-        candidates = []
-        for child in root:
-            if child.tag.endswith("Contents"):
-                key_elem = None
-                for sub in child:
-                    if sub.tag.endswith("Key"):
-                        key_elem = sub
-                        break
-
-                if key_elem is not None:
-                    key = key_elem.text
-                    if key.endswith(file_ext):
-                        candidates.append(key)
-
+        keys = _list_gcs_keys(f"{target_dir_key}/")
+        candidates = [k for k in keys if k.endswith(file_ext)]
         if not candidates:
-            raise RuntimeError(f"No firmware binary found in {target_dir_key}")
+            raise RuntimeError(
+                f"No '{file_ext}' firmware binary found in {target_dir_key}"
+            )
 
-        # Pick the first one
-        bin_key = candidates[0]
-        bin_url = f"{GCS_BASE_URL}/{bin_key}"
-        return bin_url
+        if preferred_name:
+            for key in candidates:
+                if os.path.basename(key) == preferred_name:
+                    return f"{GCS_BASE_URL}/{key}"
+            if target_stage == "rw-bootloader":
+                raise RuntimeError(
+                    f"RW bootloader binary '{preferred_name}' not found in "
+                    f"{target_dir_key}"
+                )
 
+        if target_stage == "app" and len(candidates) > 1:
+            app_bins = [
+                k
+                for k in candidates
+                if not any(
+                    x in os.path.basename(k).lower()
+                    for x in ("bootloader", "full_flash", "standalone")
+                )
+            ]
+            if app_bins:
+                candidates = app_bins
+
+        return f"{GCS_BASE_URL}/{candidates[0]}"
     except Exception as e:
         raise RuntimeError(f"Failed to locate binary in {target_dir_key}: {e}") from e
 
 
-def fetch_firmware(component: str, version: str = "stable") -> str:
-    """
-    Fetches the firmware binary for the specified component and version
-    using HTTP (public GCS bucket).
-    Returns the path to the downloaded file.
-    """
-    # Component Configuration
+def _get_fw_spec(
+    component: str, device_type: str, target_stage: str
+) -> tuple[str, str, str, str]:
+    """Returns (comp_dir, file_ext, tag_suffix, preferred_name) for a request."""
     if component == "pdc":
-        comp_dir = "pdc-fw"
-        file_ext = ".bin"
-        tag_suffix = ".pdcfw"
-    elif component == "mcu":
-        comp_dir = "mcu-fw"
-        file_ext = ".txt"
-        tag_suffix = ".mcufw"
-    else:
-        # Fallback/Placeholder
-        comp_dir = f"{component}-fw"
-        file_ext = ".bin"
-        tag_suffix = f".{component}fw"
+        return "pdc-fw", ".bin", ".pdcfw", None
+    if component == "mcu":
+        if device_type in ITE_DEVICE_TYPES:
+            stage_map = {
+                "rw-bootloader": "maui_rw_bootloader_signed.bin",
+                "ro-bootloader": "maui_full_flash_1mb.bin",
+            }
+            pref = stage_map.get(target_stage, "maui_app_signed.bin")
+            return "mcu-fw", ".bin", ".mcufw", pref
+        return "mcu-fw", ".txt", ".mcufw", "zephyr.txt"
+    return f"{component}-fw", ".bin", f".{component}fw", None
 
-    target_dir_key = ""
 
-    # Resolve Version/Tag
+def _resolve_fw_url(
+    component: str,
+    version: str,
+    device_type: str,
+    target_stage: str,
+) -> tuple[str, str]:
+    """Resolves the full GCS download URL and file extension for a firmware request."""
+    comp_dir, file_ext, tag_suffix, pref = _get_fw_spec(
+        component, device_type, target_stage
+    )
     if version in ["stable", "alpha", "prev"]:
-        target_dir_key = _resolve_tag_to_dir(version, component, comp_dir, tag_suffix)
-    else:
-        # Explicit version
-        target_dir_key = f"{comp_dir}/{version}"
+        d_key = _resolve_tag_to_dir(
+            version, component, comp_dir, tag_suffix, device_type=device_type
+        )
+        return (
+            _find_binary_in_dir(
+                d_key, file_ext, preferred_name=pref, target_stage=target_stage
+            ),
+            file_ext,
+        )
 
-    # Now find the binary in the target directory
-    bin_url = _find_binary_in_dir(target_dir_key, file_ext)
+    sub = _get_comp_subdir(component, device_type)
+    last_err = None
+    for d_key in (f"{comp_dir}/{sub}/{version}", f"{comp_dir}/{version}"):
+        try:
+            url = _find_binary_in_dir(
+                d_key, file_ext, preferred_name=pref, target_stage=target_stage
+            )
+            return url, file_ext
+        except RuntimeError as err:
+            last_err = err
+    raise last_err
 
-    # Download
+
+def fetch_firmware(
+    component: str,
+    version: str = "stable",
+    device_type: str = DEVICE_TYPE_PROTO,
+    target_stage: str = "app",
+) -> str:
+    """Fetches the firmware binary for the component, version, and device type."""
+    if device_type not in VALID_DEVICE_TYPES:
+        raise RuntimeError(
+            f"Cannot fetch cloud firmware for unknown device type '{device_type}'. "
+            f"Please specify --device_type ({', '.join(VALID_DEVICE_TYPES)})."
+        )
+
+    bin_url, file_ext = _resolve_fw_url(component, version, device_type, target_stage)
     temp_fd, temp_path = tempfile.mkstemp(prefix=f"maui_{component}_", suffix=file_ext)
     os.close(temp_fd)
 
@@ -265,7 +367,7 @@ def _enter_it82002_recovery(device, target_stage: str) -> tuple[str, str]:
     are already sitting on, or asks the running App to reboot into the right
     bootloader and then waits for it to re-enumerate.
     """
-    if device and device.device_type == "it82002_bootloader":
+    if device and device.is_bootloader:
         recovery_port = device.port
         for p in serial.tools.list_ports.comports():
             if p.device == recovery_port:
@@ -293,6 +395,49 @@ def _enter_it82002_recovery(device, target_stage: str) -> tuple[str, str]:
 
     time.sleep(1.5)
     return find_it82002_bootloader_port(timeout=12.0)
+
+
+def wait_for_ite_app_port(device: MauiDevice, timeout: float = 15.0):
+    """Waits for an ITE device to reboot back into the Main Application."""
+    logger.info(
+        "Waiting for ITE Main Application to enumerate (timeout %.1fs)...",
+        timeout,
+    )
+    time.sleep(1.5)
+    start_time = time.time()
+    target_sn = (
+        device.serial_number
+        if device.serial_number not in (None, "", "Explicit Port", "No Serial Number")
+        else None
+    )
+
+    while time.time() - start_time < timeout:
+        candidates = [
+            d
+            for d in list_maui_devices()
+            if d["type"] in ITE_DEVICE_TYPES and not d.get("is_bootloader")
+        ]
+        if target_sn:
+            # Only accept the target device; never fall back to another ITE
+            # device that happens to be connected while the target reboots.
+            candidates = [d for d in candidates if d.get("serial_number") == target_sn]
+
+        for dev_info in candidates:
+            port_path = dev_info.get("port")
+            if port_path and os.path.exists(port_path):
+                try:
+                    ser = serial.Serial(port_path)
+                    ser.close()
+                    logger.info("ITE Main Application is back online on %s", port_path)
+                    device.set_port(port_path, is_bootloader=False)
+                    return
+                except (serial.SerialException, PermissionError, OSError):
+                    pass
+        time.sleep(0.5)
+
+    raise TimeoutError(
+        "Timeout waiting for ITE Main Application serial port to appear after reboot."
+    )
 
 
 def do_update_it82002_mcuboot(device, fw_path: str, target_stage: str = "app"):
@@ -368,9 +513,9 @@ def do_update_mcu(  # pylint: disable=too-many-arguments
         logger.error("No firmware file specified.")
         sys.exit(1)
 
-    # Dispatch to IT82002 MCUboot SMP updater if device is IT82002 or stage is specified
+    # Dispatch to IT82002 MCUboot SMP updater if device is ITE or stage is specified
     if (
-        (device and device.device_type in ("it82002_app", "it82002_bootloader"))
+        (device and device.is_ite)
         or target_stage in ("rw-bootloader", "ro-bootloader")
         or fw_path.endswith(".bin")
     ):
@@ -404,13 +549,15 @@ def do_update_mcu(  # pylint: disable=too-many-arguments
 
 
 def handle_all_update(device, version, bsl_mode=False, use_usb=False):
-    """Handles updating all components."""
-    # 1. Fetch Firmware
+    """Handles updating all components (MCU then PDC)."""
+    # 1. Fetch Firmware for the detected hardware variant
     mcu_fw = None
     pdc_fw = None
     try:
-        mcu_fw = fetch_firmware("mcu", version)
-        pdc_fw = fetch_firmware("pdc", version)
+        mcu_fw = fetch_firmware(
+            "mcu", version, device_type=device.device_type, target_stage="app"
+        )
+        pdc_fw = fetch_firmware("pdc", version, device_type=device.device_type)
     except RuntimeError as e:
         logger.error(e)
         sys.exit(1)
@@ -418,8 +565,9 @@ def handle_all_update(device, version, bsl_mode=False, use_usb=False):
     try:
         port_path = device.port
         # 2. Update MCU
-        device.connect()
-        device.disconnect()
+        if not device.is_ite:
+            device.connect()
+            device.disconnect()
 
         do_update_mcu(
             mcu_fw,
@@ -427,9 +575,16 @@ def handle_all_update(device, version, bsl_mode=False, use_usb=False):
             use_usb=use_usb,
             port=port_path,
             device=device,
+            target_stage="app",
         )
 
-        if use_usb and port_path:
+        if device.is_ite:
+            try:
+                wait_for_ite_app_port(device, timeout=15.0)
+            except TimeoutError as e:
+                logger.error(e)
+                sys.exit(1)
+        elif use_usb and port_path:
             try:
                 wait_for_port(port_path, exists=True, timeout=10.0)
             except TimeoutError as e:
@@ -458,7 +613,9 @@ def handle_pdc_update(device, args):
         fw_path = args.file
     elif args.fw_channel:
         try:
-            fw_path = fetch_firmware("pdc", args.fw_channel)
+            fw_path = fetch_firmware(
+                "pdc", args.fw_channel, device_type=device.device_type
+            )
             temp_file = fw_path
         except RuntimeError as e:
             logger.error(e)
@@ -474,19 +631,23 @@ def handle_pdc_update(device, args):
 
 def handle_mcu_update(device, args):
     """Handles updating only the MCU component."""
+    target_stage = getattr(args, "target", "app")
     fw_path = None
     temp_file = None
     if args.file:
         fw_path = args.file
     elif args.fw_channel:
         try:
-            fw_path = fetch_firmware("mcu", args.fw_channel)
+            fw_path = fetch_firmware(
+                "mcu",
+                args.fw_channel,
+                device_type=device.device_type,
+                target_stage=target_stage,
+            )
             temp_file = fw_path
         except RuntimeError as e:
             logger.error(e)
             sys.exit(1)
-
-    target_stage = getattr(args, "target", "app")
 
     try:
         port_path = device.port
@@ -498,7 +659,13 @@ def handle_mcu_update(device, args):
             device=device,
             target_stage=target_stage,
         )
-        if args.usb and port_path and device.device_type == "final_native_usb":
+        if device.is_ite and target_stage == "app":
+            try:
+                wait_for_ite_app_port(device, timeout=15.0)
+            except TimeoutError as e:
+                logger.error(e)
+                sys.exit(1)
+        elif args.usb and port_path:
             try:
                 wait_for_port(port_path, exists=True, timeout=10.0)
             except TimeoutError as e:
@@ -635,10 +802,10 @@ def handle_serial_cmd(device, args):
     device.connect()
     if getattr(args, "set_sn", None):
         logger.info("Setting NVS serial number to: %s", args.set_sn)
-        resp = device.send_command(f"nvs_sn set {args.set_sn}")
+        resp = device.send_command(f"serial set {args.set_sn}")
         logger.info("Response: %s", resp)
     else:
-        resp = device.send_command("nvs_sn get")
+        resp = device.send_command("serial get")
         logger.info("Current NVS Serial Number:\n%s", resp)
 
 
@@ -779,7 +946,11 @@ def main():
 
     device = None
     try:
-        device = MauiDevice.find_device(serial_number=args.serial, port=args.port)
+        device = MauiDevice.find_device(
+            serial_number=args.serial,
+            port=args.port,
+            device_type=args.device_type,
+        )
 
         if args.component == "all":
             handle_all_update(

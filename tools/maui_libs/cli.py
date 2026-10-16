@@ -9,6 +9,7 @@ import logging
 import sys
 
 import maui_libs
+from maui_libs.transport import VALID_DEVICE_TYPES
 
 
 def add_common_args(parser: argparse.ArgumentParser):
@@ -27,6 +28,17 @@ def add_common_args(parser: argparse.ArgumentParser):
         help=(
             "Specify the serial port of the Maui device to connect to "
             "(bypasses discovery)."
+        ),
+    )
+    parser.add_argument(
+        "--device_type",
+        "--device-type",
+        dest="device_type",
+        choices=VALID_DEVICE_TYPES,
+        help=(
+            "Override the Maui hardware revision "
+            f"({', '.join(VALID_DEVICE_TYPES)}). "
+            "Auto-detected from USB VID/PID and serial number by default."
         ),
     )
     parser.add_argument(

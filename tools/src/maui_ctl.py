@@ -58,12 +58,17 @@ def main():
 
     device = None
     try:
-        device = MauiDevice.find_device(serial_number=args.serial, port=args.port)
+        device = MauiDevice.find_device(
+            serial_number=args.serial,
+            port=args.port,
+            device_type=args.device_type,
+        )
         device.connect()
 
         if args.command == "status":
             logger.info("Fetching device status...")
             response = device.send_command("version")
+            logger.info("Hardware Type: %s", device.device_type)
             logger.info("Device Version: %s", response.strip())
         elif args.command == "power":
             logger.info("Setting power state to %s...", args.state)

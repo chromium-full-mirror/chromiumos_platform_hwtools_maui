@@ -33,6 +33,7 @@ All Maui host tools support the following common arguments:
 
 *   `--serial <SERIAL>`: Specify the serial number of the Maui device to target (required when multiple devices are connected).
 *   `--port <PORT>`: Specify the explicit serial device port (e.g. `/dev/ttyACM0` or `/dev/ttyUSB0`) to bypass automatic discovery.
+*   `--device_type <TYPE>`: Override the auto-detected hardware revision (`maui_proto`, `maui_v11`, `maui_v12`, `maui_v20`).
 *   `--usb`: Enable native USB DFU flashing mode for `maui_proto_5117` hardware.
 *   `--verbose`: Enable detailed debug logging for troubleshooting transport and flashing.
 *   `--internal-version`: Report the internal version string of `maui-libs` and exit.
@@ -160,13 +161,15 @@ reading:
 
 ## Transport & Device Discovery Architecture
 
-The `maui_libs.transport` module manages low-level serial communication and handles hardware differences across board phases:
+The `maui_libs.transport` module manages low-level serial communication and handles hardware differences across board generations:
 
 *   **Supported Device Types**:
-    *   **Proto Board (`maui_proto_3507`)**: FTDI Dual USB-to-UART bridge (VID `0x0403`, PID `0x6002` / `0x6001`).
-    *   **Final Board (`maui_proto_5117`)**: Native USB CDC ACM (VID `0x18D1`, PID `0x5085`).
+    *   **`maui_proto`**: FTDI USB-to-UART bridge (VID `0x0403`, PID `0x6002` / `0x6001`) with any serial number not starting with `MAUIV11L`. Uses MSPM0 MCU firmware (`.txt`) and `v20` PDC firmware.
+    *   **`maui_v11`**: FTDI USB-to-UART bridge (VID `0x0403`, PID `0x6002` / `0x6001`) with serial number starting with `MAUIV11L`. Shares MSPM0 MCU firmware (`.txt`) with `maui_proto` and uses `v20_100w` PDC firmware.
+    *   **`maui_v12`**: Native USB CDC ACM (VID `0x18D1`, PID `0x5085`) ITE IT82002 board. Uses IT82002 MCUboot firmware (`.bin`) and shares `v20_100w` PDC firmware with `maui_v11`.
+    *   **`maui_v20`**: Native USB CDC ACM (VID `0x18D1`, PID `0x5085`) future ITE IT82002 board (serial number starting with `MAUIV20`). Uses `maui_v20` MCU and PDC firmware.
 *   **Shell Synchronization (`_synchronize_shell`)**: Ensures the serial interface is clean and ready at the prompt (`maui$`). Uses a bounded retry loop (5 retries) and non-blocking reads to avoid hangs on chatty asynchronous serial output.
-*   **Port Wait Helper (`wait_for_port`)**: Monitors CDC ACM port re-enumeration after firmware updates or reboots, ensuring tools wait for the MCU USB stack to come back online before sending subsequent commands.
+*   **Port Wait Helper (`wait_for_port` / `wait_for_ite_app_port`)**: Monitors CDC ACM port re-enumeration after firmware updates or reboots, ensuring tools wait for the MCU USB stack to come back online before sending subsequent commands.
 
 ## Development
 
@@ -207,29 +210,40 @@ Unified scripts are provided in `tools/scripts/release/` to handle the entire re
 
 **MCU Firmware:**
 ```bash
-# Build and release as 'stable'
-./tools/scripts/release/mcu_release.sh --tag stable
+# Build MSPM0 and release as 'stable' for maui_proto and maui_v11
+./tools/scripts/release/mcu_release.sh --device maui_proto,maui_v11 --tag stable
+
+# Build ITE IT82002 and release as 'stable' for maui_v12
+./tools/scripts/release/mcu_release.sh --device maui_v12 --tag stable
 ```
 
 **PDC Firmware:**
 ```bash
-# Release a local binary to the 'stable' channel
-./tools/scripts/release/pdc_release.sh --file path/to/pdc_v1.2.bin --version v1.2 --tag stable
+# Release v20 PDC binary for maui_proto
+./tools/scripts/release/pdc_release.sh --file path/to/v20_0325.bin --version v20_0325 --device maui_proto --tag stable
+
+# Release v20_100W PDC binary shared by maui_v11 and maui_v12
+./tools/scripts/release/pdc_release.sh --file path/to/v20_0325_100W.bin --version v20_0325_100W --device maui_v11,maui_v12 --tag stable
 ```
 
 The scripts automatically:
 1.  Generate dynamic version strings.
 2.  Build or package the relevant components.
 3.  Upload artifacts to GCS.
-4.  Manage channel tag migration (stable, alpha, etc.) by creating empty marker objects in GCS.
+4.  Manage per-device channel tag migration (`<channel>.<device>.mcufw` / `<channel>.<device>.pdcfw`) by creating empty marker objects in GCS.
 
 #### GCS Bucket Structure
 
 Firmware and Docker image fetching relies on a public GCS bucket `gs://maui-firmware`.
 
-**Firmware:**
-`{component}-fw/{version}/{file}`
-*   Tags are resolved via marker files (e.g., `stable.pdcfw`) in version directories.
+**MCU Firmware:**
+*   `mcu-fw/mspm0/{version}/zephyr.txt` (shared by `maui_proto` and `maui_v11`, tagged with `<channel>.maui_proto.mcufw` and `<channel>.maui_v11.mcufw`)
+*   `mcu-fw/maui_v12/{version}/{maui_app_signed.bin,maui_rw_bootloader_signed.bin,maui_full_flash_1mb.bin}` (tagged with `<channel>.maui_v12.mcufw`)
+*   `mcu-fw/maui_v20/{version}/{maui_app_signed.bin,maui_rw_bootloader_signed.bin,maui_full_flash_1mb.bin}` (tagged with `<channel>.maui_v20.mcufw`)
+
+**PDC Firmware:**
+*   `pdc-fw/{version}/{file}.bin`
+*   Per-device channel tags are placed alongside the shared binary in its version directory (e.g., `pdc-fw/v20_0325/stable.maui_proto.pdcfw`, `pdc-fw/v20_0325_100W/stable.maui_v11.pdcfw`, `pdc-fw/v20_0325_100W/stable.maui_v12.pdcfw`).
 
 **Docker Images:**
 `docker/{version}/maui-utils.tar`

@@ -11,8 +11,10 @@ command execution.
 """
 
 import logging
+import os
 from typing import Optional
 
+from maui_libs.transport import ITE_DEVICE_TYPES
 from maui_libs.transport import list_maui_devices
 from maui_libs.transport import MauiSerialTransport
 
@@ -20,7 +22,7 @@ from maui_libs.transport import MauiSerialTransport
 logger = logging.getLogger(__name__)
 
 
-class MauiDevice:
+class MauiDevice:  # pylint: disable=too-many-instance-attributes
     """Represents a connected Maui device and its capabilities."""
 
     def __init__(
@@ -30,12 +32,14 @@ class MauiDevice:
         device_type: str,
         vid: str,
         pid: str,
+        is_bootloader: bool = False,
     ):  # pylint: disable=too-many-positional-arguments,too-many-arguments
         self.port = port
         self.serial_number = serial_number
         self.device_type = device_type
         self.vid = vid
         self.pid = pid
+        self.is_bootloader = is_bootloader
         # Only create transport if port is available
         if self.port:
             self._transport = MauiSerialTransport(port)
@@ -47,6 +51,18 @@ class MauiDevice:
                 "MauiDevice initialized without a port. "
                 "Connection methods will not work."
             )
+
+    @property
+    def is_ite(self) -> bool:
+        """Returns True if this device uses an ITE IT82002 MCU (v1.2 / v2.0)."""
+        return self.device_type in ITE_DEVICE_TYPES or self.is_bootloader
+
+    def set_port(self, port: str, is_bootloader: bool = False):
+        """Updates the serial port path (e.g. after USB re-enumeration)."""
+        self.disconnect()
+        self.port = port
+        self.is_bootloader = is_bootloader
+        self._transport = MauiSerialTransport(port) if port else None
 
     def connect(self):
         """Connects to the device's serial transport."""
@@ -99,28 +115,56 @@ class MauiDevice:
 
     @classmethod
     def find_device(
-        cls, serial_number: Optional[str] = None, port: Optional[str] = None
+        cls,
+        serial_number: Optional[str] = None,
+        port: Optional[str] = None,
+        device_type: Optional[str] = None,
     ) -> "MauiDevice":
         """Discovers and returns a MauiDevice instance.
 
-        If port is specified, it bypasses discovery and uses that port.
+        If port is specified, it uses that port (and still enriches metadata
+        from USB port discovery if the port matches a known Maui device).
         If serial_number is None, it expects exactly one device.
         If multiple devices are found without a serial_number,
         it lists them and exits.
         """
+        available_devices = list_maui_devices()
+
         if port:
+            real_port = os.path.realpath(port)
+            for dev_info in available_devices:
+                if (
+                    dev_info.get("port")
+                    and os.path.realpath(dev_info["port"]) == real_port
+                ):
+                    resolved_type = device_type or dev_info["type"]
+                    logger.info(
+                        "Using specified port %s (detected %s, serial %s)",
+                        port,
+                        resolved_type,
+                        dev_info.get("serial_number", "No Serial Number"),
+                    )
+                    return cls(
+                        port=port,
+                        serial_number=serial_number
+                        or dev_info.get("serial_number", "Explicit Port"),
+                        device_type=resolved_type,
+                        vid=dev_info["vid"],
+                        pid=dev_info["pid"],
+                        is_bootloader=dev_info.get("is_bootloader", False),
+                    )
+
             logger.info(
                 "Bypassing discovery, using explicitly specified port: %s", port
             )
             return cls(
                 port=port,
                 serial_number=serial_number or "Explicit Port",
-                device_type="explicit",
+                device_type=device_type or "explicit",
                 vid="N/A",
                 pid="N/A",
+                is_bootloader=False,
             )
-
-        available_devices = list_maui_devices()
 
         if not available_devices:
             logger.error(
@@ -142,17 +186,20 @@ class MauiDevice:
                             "and does not currently support direct serial"
                             " communication."
                         )
+                    resolved_type = device_type or dev_info["type"]
                     logger.info(
-                        "Found specified Maui device: %s on %s",
+                        "Found specified Maui device: %s (%s) on %s",
                         serial_number,
+                        resolved_type,
                         dev_info["port"],
                     )
                     return cls(
                         port=dev_info["port"],
                         serial_number=dev_info["serial_number"],
-                        device_type=dev_info["type"],
+                        device_type=resolved_type,
                         vid=dev_info["vid"],
                         pid=dev_info["pid"],
+                        is_bootloader=dev_info.get("is_bootloader", False),
                     )
             logger.error("Maui device with serial %s not found.", serial_number)
             raise RuntimeError(
@@ -169,9 +216,10 @@ class MauiDevice:
             logger.info("Available devices:")
             for dev_info in available_devices:
                 logger.info(
-                    "  Serial: %s, Type: %s, Port: %s, VID: %s, PID: %s",
+                    "  Serial: %s, Type: %s%s, Port: %s, VID: %s, PID: %s",
                     dev_info.get("serial_number", "No Serial Number"),
                     dev_info["type"],
+                    " (bootloader)" if dev_info.get("is_bootloader") else "",
                     dev_info.get("port", "N/A"),
                     dev_info["vid"],
                     dev_info["pid"],
@@ -189,15 +237,18 @@ class MauiDevice:
                 f"Serial: {dev_info.get('serial_number', 'No Serial Number')} "
                 "which does not currently support direct serial communication."
             )
+        resolved_type = device_type or dev_info["type"]
         logger.info(
-            "Found single Maui device: %s on %s",
+            "Found single Maui device: %s (%s) on %s",
             dev_info.get("serial_number", "No Serial Number"),
+            resolved_type,
             dev_info["port"],
         )
         return cls(
             port=dev_info["port"],
             serial_number=dev_info.get("serial_number", "No Serial Number"),
-            device_type=dev_info["type"],
+            device_type=resolved_type,
             vid=dev_info["vid"],
             pid=dev_info["pid"],
+            is_bootloader=dev_info.get("is_bootloader", False),
         )

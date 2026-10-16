@@ -20,19 +20,64 @@ import serial.tools.list_ports
 
 logger = logging.getLogger(__name__)
 
-# Maui Device Identification
+# Maui Hardware Device Types
+DEVICE_TYPE_PROTO = "maui_proto"
+DEVICE_TYPE_V11 = "maui_v11"
+DEVICE_TYPE_V12 = "maui_v12"
+DEVICE_TYPE_V20 = "maui_v20"
+
+VALID_DEVICE_TYPES = (
+    DEVICE_TYPE_PROTO,
+    DEVICE_TYPE_V11,
+    DEVICE_TYPE_V12,
+    DEVICE_TYPE_V20,
+)
+MSPM0_DEVICE_TYPES = (
+    DEVICE_TYPE_PROTO,
+    DEVICE_TYPE_V11,
+)
+ITE_DEVICE_TYPES = (
+    DEVICE_TYPE_V12,
+    DEVICE_TYPE_V20,
+)
+
+# Serial number prefixes for hardware classification
+MAUI_V11_SERIAL_PREFIX = "MAUIV11L"
+MAUI_V20_SERIAL_PREFIX = "MAUIV20"
+
+# Maui USB Identification
 MAUI_PROTO_FTDI_VID = 0x0403
-MAUI_PROTO_FTDI_PID = 0x6002  # Custom PID for Maui Proto
+MAUI_PROTO_FTDI_PID = 0x6002  # Custom PID for Maui Proto / v1.1
 MAUI_PROTO_FTDI_PID_DEFAULT = 0x6001  # Standard FTDI PID fallback
 
-# Final Native USB Phase (Zephyr CDC ACM)
+# Native USB Phase (Zephyr CDC ACM - ITE IT82002)
 MAUI_FINAL_VID = 0x18D1  # Google VID
-MAUI_FINAL_PID = 0x5085  # Maui Legacy / MSPM0 PID
-MAUI_IT82002_APP_PID = 0x5066  # Maui IT82002 Main App PID
-MAUI_IT82002_BOOTLOADER_PID = 0x5067  # Maui IT82002 MCUboot Recovery PID
+MAUI_FINAL_PID = 0x5085  # Maui Main / Bootloader PID
+MAUI_IT82002_APP_PID = 0x5066  # Maui IT82002 Legacy App PID
+MAUI_IT82002_BOOTLOADER_PID = 0x5067  # Maui IT82002 Legacy MCUboot Recovery PID
 
 # USB interface string of the IT82002 App's RPC CDC-ACM port.
 MAUI_RPC_INTERFACE_NAME = "Maui RPC"
+
+
+def classify_ftdi_device(serial_number: str = None) -> str:
+    """Classifies an FTDI-connected Maui device into maui_v11 or maui_proto.
+
+    v1.1 boards have a serial number starting with 'MAUIV11L'; all other FTDI
+    boards are classified as 'maui_proto'.
+    """
+    if serial_number and serial_number.upper().startswith(MAUI_V11_SERIAL_PREFIX):
+        return DEVICE_TYPE_V11
+    return DEVICE_TYPE_PROTO
+
+
+def classify_ite_device(serial_number: str = None, product: str = None) -> str:
+    """Classifies a native-USB ITE Maui device into maui_v12 or maui_v20."""
+    if serial_number and serial_number.upper().startswith(MAUI_V20_SERIAL_PREFIX):
+        return DEVICE_TYPE_V20
+    if product and "V20" in product.upper():
+        return DEVICE_TYPE_V20
+    return DEVICE_TYPE_V12
 
 
 class MauiSerialTransport:
@@ -253,7 +298,13 @@ class MauiSerialTransport:
 
 
 def list_maui_devices():
-    """Scans for connected Maui devices (both Proto and Final Native USB phases).
+    """Scans for connected Maui devices across all hardware generations.
+
+    Classifies devices into:
+      * 'maui_v11': FTDI USB-to-UART with serial starting with 'MAUIV11L'
+      * 'maui_proto': FTDI USB-to-UART with any other serial number
+      * 'maui_v20': Native USB ITE device with serial starting with 'MAUIV20'
+      * 'maui_v12': Native USB ITE device (all other serials)
 
     Returns a list of dictionaries containing device info.
     """
@@ -261,14 +312,16 @@ def list_maui_devices():
 
     # Use serial port enumeration for both environments since Zephyr provides CDC ACM
     for port in serial.tools.list_ports.comports():
-        # Check for Proto (FTDI) devices
+        # Check for FTDI (maui_proto and maui_v11) devices
         if port.vid == MAUI_PROTO_FTDI_VID and port.pid in (
             MAUI_PROTO_FTDI_PID,
             MAUI_PROTO_FTDI_PID_DEFAULT,
         ):
+            dev_type = classify_ftdi_device(port.serial_number)
             devices.append(
                 {
-                    "type": "proto_ftdi",
+                    "type": dev_type,
+                    "is_bootloader": False,
                     "port": port.device,
                     "serial_number": port.serial_number,
                     "vid": f"0x{port.vid:04x}",
@@ -276,20 +329,29 @@ def list_maui_devices():
                     "description": port.description,
                 }
             )
-        # Check for Final (Native USB CDC ACM) devices
-        # (App or Bootloader sharing 0x18D1:0x5085). The App's second
-        # interface is the machine RPC channel (maui_libs.rpc), not a shell.
+        # Check for ITE Native USB CDC ACM devices (maui_v12 and maui_v20)
+        # (App or Bootloader sharing 0x18D1:0x5085, or legacy 0x5066/0x5067).
+        # The App's second interface is the machine RPC channel (maui_libs.rpc),
+        # not a shell.
         elif (
             port.vid == MAUI_FINAL_VID
-            and port.pid == MAUI_FINAL_PID
+            and port.pid
+            in (
+                MAUI_FINAL_PID,
+                MAUI_IT82002_APP_PID,
+                MAUI_IT82002_BOOTLOADER_PID,
+            )
             and (port.interface or "") != MAUI_RPC_INTERFACE_NAME
         ):
-            is_bootloader = "BOOTLOADER" in (port.product or "").upper()
+            is_bootloader = (
+                port.pid == MAUI_IT82002_BOOTLOADER_PID
+                or "BOOTLOADER" in (port.product or "").upper()
+            )
+            dev_type = classify_ite_device(port.serial_number, port.product)
             devices.append(
                 {
-                    "type": (
-                        "it82002_bootloader" if is_bootloader else "final_native_usb"
-                    ),
+                    "type": dev_type,
+                    "is_bootloader": is_bootloader,
                     "port": port.device,
                     "serial_number": port.serial_number,
                     "vid": f"0x{port.vid:04x}",
@@ -297,36 +359,6 @@ def list_maui_devices():
                     "description": port.product
                     or port.description
                     or "Google Inc. Maui Debug Board (Native USB)",
-                }
-            )
-        # Check for IT82002 Main Application (Native USB CDC ACM)
-        elif (
-            port.vid == MAUI_FINAL_VID
-            and port.pid == MAUI_IT82002_APP_PID
-            and (port.interface or "") != MAUI_RPC_INTERFACE_NAME
-        ):
-            devices.append(
-                {
-                    "type": "it82002_app",
-                    "port": port.device,
-                    "serial_number": port.serial_number,
-                    "vid": f"0x{port.vid:04x}",
-                    "pid": f"0x{port.pid:04x}",
-                    "description": port.description
-                    or "Google Inc. Maui IT82002 Debug Board (App)",
-                }
-            )
-        # Check for IT82002 MCUboot Serial Recovery (Native USB CDC ACM)
-        elif port.vid == MAUI_FINAL_VID and port.pid == MAUI_IT82002_BOOTLOADER_PID:
-            devices.append(
-                {
-                    "type": "it82002_bootloader",
-                    "port": port.device,
-                    "serial_number": port.serial_number,
-                    "vid": f"0x{port.vid:04x}",
-                    "pid": f"0x{port.pid:04x}",
-                    "description": port.description
-                    or "Google Inc. Maui IT82002 Debug Board (MCUboot Recovery)",
                 }
             )
 
