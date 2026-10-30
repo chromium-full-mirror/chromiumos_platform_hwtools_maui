@@ -73,14 +73,24 @@ if [[ "$FIRST_DEV" == "maui_proto" || "$FIRST_DEV" == "maui_v11" ]]; then
     echo "Firmware: $GCS_BUCKET/$COMP_DIR/$VERSION_PATH/zephyr.txt"
 
 elif [[ "$FIRST_DEV" == "maui_v12" || "$FIRST_DEV" == "maui_v20" ]]; then
+    [[ ${#DEV_ARRAY[@]} -gt 1 ]] && { echo "maui_v12 and maui_v20 need separate releases"; exit 1; }
+
     MCU_SUBDIR="$FIRST_DEV"
     VERSION_PATH="${MCU_SUBDIR}/${VERSION}"
+
+    if [[ "$FIRST_DEV" == "maui_v12" ]]; then
+        REV="v1p2"
+    elif [[ "$FIRST_DEV" == "maui_v20" ]]; then
+        REV="v2p0"
+    else
+        exit 1
+    fi
 
     echo "Building ITE IT82002 firmware for $FIRST_DEV using Docker..."
     docker build -t maui-builder-it82002 --build-arg BOARD=it82002 -f dockerfiles/Dockerfile.fw_builder .
     docker run --rm -v "$(pwd):/repo" -w /repo/firmware \
         --entrypoint bash maui-builder-it82002 \
-        -c './bootloader/mcuboot/build_bootloaders.sh'
+        -c "REV=${REV} ./bootloader/mcuboot/build_bootloaders.sh"
 
     APP_ARTIFACT="firmware/maui_app_signed.bin"
     RW_ARTIFACT="firmware/maui_rw_bootloader_signed.bin"

@@ -75,7 +75,7 @@ def classify_ite_device(serial_number: str = None, product: str = None) -> str:
     """Classifies a native-USB ITE Maui device into maui_v12 or maui_v20."""
     if serial_number and serial_number.upper().startswith(MAUI_V20_SERIAL_PREFIX):
         return DEVICE_TYPE_V20
-    if product and "V20" in product.upper():
+    if product and any(tag in product.upper() for tag in ("V20", "V2P0", "V2.0")):
         return DEVICE_TYPE_V20
     return DEVICE_TYPE_V12
 

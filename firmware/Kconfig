@@ -44,6 +44,7 @@ config HOST_MUX_HIGH_THRESH
 config HOST_MUX_SEL_INVERTED
 	bool "USB3 host mux SEL polarity is inverted"
 	default y if BOARD_MAUI_V1P2_IT82002
+	default y if BOARD_MAUI_V2P0_IT82002
 	help
 	  By default USB3_MUX_HOST_SEL is driven low for CC1 (normal) and high
 	  for CC2 (flipped) orientation. Enable this on boards where the mux
@@ -65,6 +66,7 @@ config MAUI_HOST_MUX
 config MAUI_H2H_FLASH
 	bool "H2H bridge (PL27A1) SPI flash access"
 	default y if BOARD_MAUI_V1P2_IT82002
+	default y if BOARD_MAUI_V2P0_IT82002
 	depends on SPI
 	help
 	  Lets the MCU take over the PL27A1 H2H bridge's SPI flash (holding the
@@ -189,5 +191,11 @@ module-str = maui_rpc
 source "subsys/logging/Kconfig.template.log_config"
 
 endif # MAUI_RPC
+
+config MAUI_BOARD_NAME
+	string "Maui board name"
+	default "Maui"
+	help
+	  Board name used by USB device name
 
 source "Kconfig.zephyr"

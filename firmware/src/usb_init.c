@@ -30,7 +30,7 @@ USBD_DEVICE_DEFINE(sample_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)),
 
 USBD_DESC_LANG_DEFINE(sample_lang);
 USBD_DESC_MANUFACTURER_DEFINE(sample_mfr, "Google LLC");
-USBD_DESC_PRODUCT_DEFINE(sample_product, "Maui Diagnostic Controller");
+USBD_DESC_PRODUCT_DEFINE(sample_product, CONFIG_MAUI_BOARD_NAME);
 
 static struct usbd_desc_node sample_sn = {
 	.str = {

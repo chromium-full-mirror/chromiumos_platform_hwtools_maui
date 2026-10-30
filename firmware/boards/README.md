@@ -1,4 +1,4 @@
-# Maui `maui_v1p2_it82002`
+# Maui `maui_v1p2_it82002` and `maui_v2p0_it82002`
 
 Board documentation for the ITE **IT82002AW** Maui prototype: flash layout, the
 three-stage boot flow, hardware flash write-protection, and how to build and
@@ -18,7 +18,7 @@ bootloaders.
 
 ## 1. Flash layout
 
-Defined in [`maui_v1p2_it82002.dts`](maui_v1p2_it82002.dts). The MCU maps flash
+Defined in [`maui_v1p2_it82002.dts`](maui_v1p2_it82002/maui_v1p2_it82002.dts). The MCU maps flash
 at `0x80000000`; all offsets below are flash-relative.
 
 | Offset | Size | Partition | Contents |
@@ -54,7 +54,7 @@ and is rejected with `rc=3` before a single byte of flash is touched.
 
 | Running stage | `--slot 0` writes | `--slot 1` |
 |---|---|---|
-| **RO** bootloader ([`ro_bootloader.overlay`](../../bootloader/mcuboot/ro_bootloader.overlay)) | RW bootloader (`0x18000`) | rejected, `rc=3` |
+| **RO** bootloader ([`ro_bootloader.overlay`](../bootloader/mcuboot/ro_bootloader.overlay)) | RW bootloader (`0x18000`) | rejected, `rc=3` |
 | **RW** bootloader (single-slot) | App (`0x38000`) | rejected, `rc=3` |
 
 The RO bootloader redefines `slot0_partition`/`slot1_partition` via its overlay
@@ -72,7 +72,7 @@ bootloader from RO, then reflash the App from RW.
 flowchart TD
     POR["Reset / power-on"] --> RO["RO bootloader"]
     RO -->|"BBRAM = FORCE_RO<br/>or crashloop >= 4"| ROARM["arm EWPR0..2<br/>+ freeze (EPLR)"]
-    ROARM --> ROREC["RO serial recovery<br/>'Maui RO Recovery Bootloader'"]
+    ROARM --> ROREC["RO serial recovery<br/>'Maui RO Bootloader'"]
     RO -->|"otherwise"| RWARM["arm EWPR0..6<br/>+ freeze (EPLR)"]
     RWARM -->|"RW image invalid"| FORCE["force crashloop = 4<br/>and reset"]
     FORCE --> POR
@@ -88,7 +88,7 @@ so register state set by RO persists into RW.
 ### Crashloop recovery (two-tier)
 
 A counter in BBRAM (magic `'CRS\0'`, see
-[`health.h`](../../src/health.h)) is incremented by the RO bootloader on every
+[`health.h`](../src/health.h)) is incremented by the RO bootloader on every
 boot and reset to 0 by the App once it has run for 2 seconds.
 
 | Count | Behaviour |
@@ -111,7 +111,7 @@ reset               # -> normal boot
 ```
 
 All of these perform an **ETWD hardware reset**; `sys_arch_reboot()` is
-overridden in [`health.c`](../../src/health.c) so `kernel reboot cold` does the
+overridden in [`health.c`](../src/health.c) so `kernel reboot cold` does the
 same thing. There is no separate warm/cold distinction on this board — only
 removing power is different.
 
@@ -124,7 +124,7 @@ entrypoint flow used by the TI boards.
 
 > [!WARNING]
 > `CONFIG_FIND_NEXT_SLOT_HOOKS=y` in
-> [`ro_bootloader.conf`](../../bootloader/mcuboot/ro_bootloader.conf) is
+> [`ro_bootloader.conf`](../bootloader/mcuboot/ro_bootloader.conf) is
 > load-bearing and fails **silently** if removed. It is a *different* Kconfig
 > from `CONFIG_BOOT_IMAGE_ACCESS_HOOKS`; without it the call site expands to a
 > no-op, the linker garbage-collects `boot_find_next_slot_hook()`, and the build
@@ -141,7 +141,7 @@ docker build -t maui-builder-it82002 --build-arg BOARD=it82002 -f dockerfiles/Do
 
 > [!IMPORTANT]
 > The image pins Zephyr to a **release tag** (`v4.4.2`) in
-> [`Dockerfile.fw_builder`](../../../dockerfiles/Dockerfile.fw_builder), because
+> [`Dockerfile.fw_builder`](../../dockerfiles/Dockerfile.fw_builder), because
 > `west` resolves the module revisions (MCUboot, mbedTLS, zcbor) from that
 > tree's manifest. Tracking `main` made rebuilds non-reproducible and eventually
 > broke the build outright: a later `main` force-enables
@@ -160,12 +160,22 @@ docker run --rm -v "$(pwd)":/repo -w /repo/firmware \
   -c './bootloader/mcuboot/build_bootloaders.sh'
 ```
 
+This script builds by default the revision `v1p2`. To build other revisions, like `v2p0`,
+you have to provide environment variable to the shell script.  
+For example, you can build `v2p0` by running:
+
+```shell
+docker run --rm -v "$(pwd)":/repo -w /repo/firmware \
+  --entrypoint bash maui-builder-it82002 \
+  -c 'REV=v2p0 ./bootloader/mcuboot/build_bootloaders.sh'
+```
+
 > [!IMPORTANT]
 > `--entrypoint bash` is required. The image's default `ENTRYPOINT`
 > (`/firmware_build.sh`) builds only the standalone single-image app and will
 > **not** produce the bootloaders or the combined flash image.
 
-[`build_bootloaders.sh`](../../bootloader/mcuboot/build_bootloaders.sh) uses
+[`build_bootloaders.sh`](../bootloader/mcuboot/build_bootloaders.sh) uses
 `west build -p always`, so every run is a clean build (~2–3 min). Outputs land in
 `firmware/`:
 
@@ -223,7 +233,7 @@ smpmgr --port /dev/ttyACM0 upgrade --slot 0 firmware/maui_app_signed.bin
 ```shell
 # From the App shell:
 reboot ro
-# Wait for "Maui RO Recovery Bootloader", then:
+# Wait for "Maui RO Bootloader", then:
 smpmgr --port /dev/ttyACM0 upgrade --slot 0 firmware/maui_rw_bootloader_signed.bin
 ```
 
@@ -247,7 +257,7 @@ a board with no working bootloader at all.
 Confirm which stage is live before flashing:
 
 ```shell
-dmesg | tail    # "Maui RO Recovery Bootloader" / "Maui RW Bootloader"
+dmesg | tail    # "Maui RO Bootloader" / "Maui RW Bootloader"
 ```
 
 > [!NOTE]
@@ -284,7 +294,7 @@ they are refused while an RPC flashing session owns the flash.
 Both bootloaders are protected in **hardware**, by the SoC's GCTRL Eflash Write
 Protect registers — not by software checks in the flash driver, which the
 application could simply bypass. Implemented in
-[`it82002_mcuboot_hook.c`](../../bootloader/mcuboot/it82002_mcuboot_hook.c).
+[`it82002_mcuboot_hook.c`](../bootloader/mcuboot/it82002_mcuboot_hook.c).
 
 ### Registers
 
@@ -360,7 +370,7 @@ unprotectable until the next reset.
 
 > [!IMPORTANT]
 > The App **must** call `health_init()` during startup (it already does, from
-> [`main.c`](../../src/main.c)). That schedules the work item which clears the
+> [`main.c`](../src/main.c)). That schedules the work item which clears the
 > BBRAM crashloop counter once the App has run for 3 s.
 >
 > An App that does not clear the counter looks perfectly healthy but leaves it
@@ -480,9 +490,9 @@ write-protection only to stop *accidents*, not attacks.
 
 | Path | Purpose |
 |---|---|
-| [`maui_v1p2_it82002.dts`](maui_v1p2_it82002.dts) | Board DTS, partition table |
-| [`it82002_mcuboot_hook.c`](../../bootloader/mcuboot/it82002_mcuboot_hook.c) | Boot target selection, crashloop logic, flash protection, slot hook, USB descriptor |
-| [`build_bootloaders.sh`](../../bootloader/mcuboot/build_bootloaders.sh) | Builds all stages and assembles the 1 MB image |
-| [`ro_bootloader.conf`](../../bootloader/mcuboot/ro_bootloader.conf) / [`.overlay`](../../bootloader/mcuboot/ro_bootloader.overlay) | RO bootloader config and slot remap |
-| [`rw_bootloader.conf`](../../bootloader/mcuboot/rw_bootloader.conf) / [`.overlay`](../../bootloader/mcuboot/rw_bootloader.overlay) | RW bootloader config |
-| [`health.c`](../../src/health.c) / [`health.h`](../../src/health.h) | ETWD reset, BBRAM crashloop, `health` shell commands |
+| [`maui_v1p2_it82002.dts`](maui_v1p2_it82002/maui_v1p2_it82002.dts) | Board DTS, partition table |
+| [`it82002_mcuboot_hook.c`](../bootloader/mcuboot/it82002_mcuboot_hook.c) | Boot target selection, crashloop logic, flash protection, slot hook, USB descriptor |
+| [`build_bootloaders.sh`](../bootloader/mcuboot/build_bootloaders.sh) | Builds all stages and assembles the 1 MB image |
+| [`ro_bootloader.conf`](../bootloader/mcuboot/ro_bootloader.conf) / [`.overlay`](../bootloader/mcuboot/ro_bootloader.overlay) | RO bootloader config and slot remap |
+| [`rw_bootloader.conf`](../bootloader/mcuboot/rw_bootloader.conf) / [`.overlay`](../bootloader/mcuboot/rw_bootloader.overlay) | RW bootloader config |
+| [`health.c`](../src/health.c) / [`health.h`](../src/health.h) | ETWD reset, BBRAM crashloop, `health` shell commands |

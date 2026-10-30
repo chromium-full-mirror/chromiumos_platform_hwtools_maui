@@ -16,6 +16,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+#include "gpio.h"
+#endif
+
 #if defined(CONFIG_SOC_FAMILY_TI_MSPM0) || defined(CONFIG_SOC_MSPM0G3507) || \
 	defined(CONFIG_SOC_MSPM0G5117)
 #include <m0p/dl_factoryregion.h>
@@ -46,12 +50,16 @@
 
 LOG_MODULE_REGISTER(adc);
 
-#define DT_ADC_NODE_FROM_NODELABEL(node)                                   \
-	COND_CODE_1(DT_NODE_EXISTS(DT_NODELABEL(node)),                    \
-		    (ADC_DT_SPEC_STRUCT(DT_PARENT(DT_NODELABEL(node)),     \
-					DT_PROP_BY_IDX(DT_NODELABEL(node), \
-						       reg, 0))),          \
-		    ({ 0 }))
+#define DT_ADC_SPEC_PRESENT(node)				\
+	ADC_DT_SPEC_STRUCT(DT_PARENT(DT_NODELABEL(node)),	\
+	DT_PROP_BY_IDX(DT_NODELABEL(node), reg, 0))
+
+#define DT_ADC_SPEC_ABSENT(node) { 0 }
+
+#define DT_ADC_NODE_FROM_NODELABEL(node)				\
+		COND_CODE_1(DT_NODE_EXISTS(DT_NODELABEL(node)),		\
+			(DT_ADC_SPEC_PRESENT),				\
+			(DT_ADC_SPEC_ABSENT))(node)
 
 static const struct adc_dt_spec adc_channels[] = {
 	[ADC_CH_USB_HOST_CC1] = DT_ADC_NODE_FROM_NODELABEL(adc_usb_host_cc1),
@@ -66,6 +74,8 @@ static const struct adc_dt_spec adc_channels[] = {
 		DT_ADC_NODE_FROM_NODELABEL(adc_ppvar_usb_dut_vbus),
 	[ADC_CH_PP5000_USB_HOST_VBUS] =
 		DT_ADC_NODE_FROM_NODELABEL(adc_pp5000_usb_host_vbus),
+	[ADC_CH_PP5000_USB_FLASH_VBUS] =
+		DT_ADC_NODE_FROM_NODELABEL(adc_pp5000_usb_flash_vbus),
 	[ADC_CH_PP5000] = DT_ADC_NODE_FROM_NODELABEL(adc_pp5000),
 };
 
@@ -78,6 +88,12 @@ static const struct adc_dt_spec adc_channels[] = {
  */
 static bool adc_ch_present(enum adc_type ch)
 {
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+	if (ch == ADC_CH_PP5000) {
+		return true;
+	}
+#endif
+
 	return ch < ADC_CH_COUNT && adc_channels[ch].dev != NULL;
 }
 
@@ -102,6 +118,8 @@ static const char *adc_channel_name(enum adc_type ch)
 		return "PPVAR_USB_DUT_VBUS";
 	case ADC_CH_PP5000_USB_HOST_VBUS:
 		return "PP5000_USB_HOST_VBUS";
+	case ADC_CH_PP5000_USB_FLASH_VBUS:
+		return "PP5000_USB_FLASH_VBUS";
 	case ADC_CH_PP5000:
 		return "PP5000";
 	default:
@@ -125,6 +143,14 @@ int adcs_init(void)
 		present++;
 
 		LOG_DBG("Initializing ADC channel %s", adc_channel_name(a));
+
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+		if (a == ADC_CH_PP5000) {
+			// This channel is calculated from GPIO logic value
+			ready++;
+			continue;
+		}
+#endif
 
 		if (!adc_is_ready_dt(&adc_channels[a])) {
 			LOG_ERR("ADC controller for channel %s is not ready",
@@ -164,6 +190,18 @@ int adc_ch_read(enum adc_type ch)
 	if (!adc_ch_present(ch)) {
 		return -ENOTSUP;
 	}
+
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+	if (ch == ADC_CH_PP5000) {
+		int val = gpio_get(GPIO_EC_ADC_PP5000);
+		if (val < 0) {
+			return val;
+		}
+
+		// Convert 0/1 to 0mV/5000mV
+		return val * 5000;
+	}
+#endif
 
 	struct adc_sequence sequence = {
 		.buffer = &buf,
@@ -218,10 +256,10 @@ static int cmd_status(const struct shell *sh, size_t argc, char **argv)
 
 		mv = adc_ch_read(a);
 		if (mv < 0) {
-			shell_print(sh, "[%20s] = error (%d)",
+			shell_print(sh, "[%21s] = error (%d)",
 				    adc_channel_name(a), mv);
 		} else {
-			shell_print(sh, "[%20s] =% 5d mV", adc_channel_name(a),
+			shell_print(sh, "[%21s] =% 6d mV", adc_channel_name(a),
 				    mv);
 		}
 	}

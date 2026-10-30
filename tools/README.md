@@ -280,6 +280,9 @@ Unified scripts are provided in `tools/scripts/release/` to handle the entire re
 
 # Build ITE IT82002 and release as 'stable' for maui_v12
 ./tools/scripts/release/mcu_release.sh --device maui_v12 --tag stable
+
+# Build ITE IT82002 and release as 'stable' for maui_v20
+./tools/scripts/release/mcu_release.sh --device maui_v20 --tag stable
 ```
 
 **PDC Firmware:**

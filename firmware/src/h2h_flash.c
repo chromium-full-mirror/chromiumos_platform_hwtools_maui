@@ -197,7 +197,7 @@ static bool is_erased(const uint8_t *data, size_t len)
 
 static int bus_on(void)
 {
-#if defined(CONFIG_BOARD_MAUI_V1P2_IT82002)
+#if defined(CONFIG_BOARD_MAUI_V1P2_IT82002) || defined(CONFIG_BOARD_MAUI_V2P0_IT82002)
 	/* 1. Hold Prolific PL27A1 in reset (H2H_RESET_L = active/low) */
 	(void)gpio_set(GPIO_H2H_RESET_L, 1);
 	k_msleep(10);
@@ -221,7 +221,7 @@ static int bus_on(void)
 
 static int bus_off(void)
 {
-#if defined(CONFIG_BOARD_MAUI_V1P2_IT82002)
+#if defined(CONFIG_BOARD_MAUI_V1P2_IT82002) || defined(CONFIG_BOARD_MAUI_V2P0_IT82002)
 	/*
 	 * 1. Switch the mux back to the PL27A1. The mux output buffer
 	 * (EC_MEM_OE_L, active low) must stay ENABLED: it sits between the

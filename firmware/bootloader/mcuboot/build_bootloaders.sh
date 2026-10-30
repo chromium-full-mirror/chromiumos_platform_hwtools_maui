@@ -5,11 +5,12 @@
 
 set -e
 
+MAUI_REV=${REV:-v1p2}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 FIRMWARE_DIR="${REPO_DIR}/firmware"
 
-echo "=== Building Maui ITE IT82002 Multi-Stage MCUboot System ==="
+echo "=== Building Maui ${MAUI_REV} ITE IT82002 Multi-Stage MCUboot System ==="
 echo "    Layout: RO (96KB @ 0x0) | RW (128KB @ 0x18000) | App (768KB @ 0x38000) | NVS (32KB @ 0xF8000)"
 
 cd "${FIRMWARE_DIR}"
@@ -22,25 +23,27 @@ chmod +x ./version.sh
 
 # 1. Build RO Bootloader (Offset 0x00000000, 96KB)
 echo "--> Building RO Recovery Bootloader (96 KB @ 0x80000000)..."
-west build -b maui_v1p2_it82002 -d build_mcuboot_ro -p always /zephyr/bootloader/mcuboot/boot/zephyr -- \
+west build -b maui_${MAUI_REV}_it82002 -d build_mcuboot_ro -p always /zephyr/bootloader/mcuboot/boot/zephyr -- \
 	-DBOARD_ROOT="${FIRMWARE_DIR}" \
 	-DDTS_ROOT="${FIRMWARE_DIR}" \
 	-DZEPHYR_EXTRA_MODULES="${SCRIPT_DIR}" \
 	-DEXTRA_CFLAGS="-DMAUI_RO_BOOTLOADER=1" \
 	-DEXTRA_CONF_FILE="${SCRIPT_DIR}/ro_bootloader.conf" \
-	-DDTC_OVERLAY_FILE="${SCRIPT_DIR}/ro_bootloader.overlay"
+	-DDTC_OVERLAY_FILE="${SCRIPT_DIR}/ro_bootloader.overlay" \
+	-DCONFIG_USB_DEVICE_PRODUCT="\"Maui ${MAUI_REV} RO Bootloader\""
 cp -f build_mcuboot_ro/zephyr/zephyr.bin build_mcuboot_ro/zephyr/ro_bootloader.bin
 echo "    RO Bootloader built: build_mcuboot_ro/zephyr/ro_bootloader.bin ($(stat -c%s build_mcuboot_ro/zephyr/ro_bootloader.bin) bytes)"
 
 # 2. Build RW Bootloader (Offset 0x00018000, 128KB)
 echo "--> Building RW Updatable Bootloader (128 KB @ 0x80018000)..."
-west build -b maui_v1p2_it82002 -d build_mcuboot_rw -p always /zephyr/bootloader/mcuboot/boot/zephyr -- \
+west build -b maui_${MAUI_REV}_it82002 -d build_mcuboot_rw -p always /zephyr/bootloader/mcuboot/boot/zephyr -- \
 	-DBOARD_ROOT="${FIRMWARE_DIR}" \
 	-DDTS_ROOT="${FIRMWARE_DIR}" \
 	-DZEPHYR_EXTRA_MODULES="${SCRIPT_DIR}" \
 	-DEXTRA_CFLAGS="-DMAUI_RW_BOOTLOADER=1" \
 	-DEXTRA_CONF_FILE="${SCRIPT_DIR}/rw_bootloader.conf" \
-	-DDTC_OVERLAY_FILE="${SCRIPT_DIR}/rw_bootloader.overlay"
+	-DDTC_OVERLAY_FILE="${SCRIPT_DIR}/rw_bootloader.overlay" \
+	-DCONFIG_USB_DEVICE_PRODUCT="\"Maui ${MAUI_REV} RW Bootloader\""
 cp -f build_mcuboot_rw/zephyr/zephyr.bin build_mcuboot_rw/zephyr/rw_bootloader.bin
 # NOTE: Do NOT pass --pad-header because CONFIG_ROM_START_OFFSET=0x200 already pads 0x200 bytes in zephyr.bin
 imgtool sign --header-size 0x200 --align 4 --version 1.0.0 --slot-size 0x20000 \
@@ -50,7 +53,7 @@ echo "    RW Bootloader signed: ${FIRMWARE_DIR}/maui_rw_bootloader_signed.bin ($
 
 # 3. Build Main Application (Offset 0x00038000, 768KB)
 echo "--> Building Main Application (768 KB @ 0x80038000)..."
-west build -b maui_v1p2_it82002 -d build_docker -p always "${FIRMWARE_DIR}" -- \
+west build -b maui_${MAUI_REV}_it82002 -d build_docker -p always "${FIRMWARE_DIR}" -- \
 	-DCONFIG_BOOTLOADER_MCUBOOT=y \
 	-DCONFIG_USE_DT_CODE_PARTITION=y \
 	-DDTC_OVERLAY_FILE="${SCRIPT_DIR}/app_mcuboot.overlay"
@@ -63,7 +66,7 @@ echo "    Main Application signed: ${FIRMWARE_DIR}/maui_app_signed.bin ($(stat -
 
 # 3b. Also build Standalone Main Application at 0x00000000 (No Bootloader) for bringup isolation
 echo "--> Building Standalone Main Application (at 0x80000000, no bootloader)..."
-west build -b maui_v1p2_it82002 -d build_standalone -p always "${FIRMWARE_DIR}"
+west build -b maui_${MAUI_REV}_it82002 -d build_standalone -p always "${FIRMWARE_DIR}"
 cp -f build_standalone/zephyr/zephyr.bin build_docker/zephyr/maui_standalone_0x0.bin
 cp -f build_standalone/zephyr/zephyr.bin "${FIRMWARE_DIR}/maui_standalone_0x0.bin"
 echo "    Standalone App built: ${FIRMWARE_DIR}/maui_standalone_0x0.bin ($(stat -c%s "${FIRMWARE_DIR}/maui_standalone_0x0.bin") bytes)"

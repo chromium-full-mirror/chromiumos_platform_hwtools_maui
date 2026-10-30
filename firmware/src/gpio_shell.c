@@ -14,7 +14,7 @@ LOG_MODULE_DECLARE(gpio);
 static void gpio_print(const struct shell *sh, enum gpio_t gpio_id, int val)
 {
 	char type = (gpio_get_init_flags(gpio_id) & GPIO_OUTPUT) ? 'O' : 'I';
-	shell_print(sh, "[%25s] %c = %d", gpio_get_name(gpio_id), type, val);
+	shell_print(sh, "[%29s] %c = %d", gpio_get_name(gpio_id), type, val);
 }
 
 static int cmd_get(const struct shell *sh, size_t argc, char **argv)
