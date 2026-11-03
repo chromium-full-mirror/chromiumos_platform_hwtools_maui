@@ -97,8 +97,10 @@ message PingResponse {
 // h2h (200 - 299): reading and programming the SPI flash of the Prolific
 // PL27A1 bridge.
 //
-// Write session: H2hBegin (acquire bus, full-chip erase) -> H2hWrite x N
-// (strictly sequential offsets, each chunk <= max_chunk_size) -> H2hFinish
+// Write session: H2hBegin (acquire bus, full-chip erase) or H2hBeginRange
+// (acquire bus, erase only the sectors of one range) -> H2hWrite x N
+// (strictly sequential offsets from the start of the range, each chunk <=
+// max_chunk_size) -> H2hFinish
 // (the MCU reads the flash back and checks CRC-32 against image_crc32, then
 // returns the bus to the PL27A1).
 //
@@ -134,6 +136,26 @@ message H2hBeginRequest {
 }
 
 message H2hBeginResponse {
+  uint32 jedec_id = 1;
+  uint32 flash_size = 2;
+  uint32 max_chunk_size = 3;
+}
+
+// Range write session: like H2hBegin, but erases only the 4 KB sectors of
+// [offset, offset + image_size) and expects the H2hWrite chunks from offset
+// (H2hWrite offsets are absolute flash addresses, so the first one is
+// offset, not 0). The rest of the flash is left untouched. offset and image_size must be
+// multiples of the 4 KB sector size, so every byte the erase clears is
+// rewritten. H2hFinish checks the CRC-32 of that range. Used to change a few
+// bytes (e.g. the USB serial number in the first sector) without erasing the
+// whole chip.
+message H2hBeginRangeRequest {
+  uint32 offset = 1;
+  uint32 image_size = 2;
+  uint32 image_crc32 = 3;
+}
+
+message H2hBeginRangeResponse {
   uint32 jedec_id = 1;
   uint32 flash_size = 2;
   uint32 max_chunk_size = 3;
@@ -203,6 +225,7 @@ message Request {
     H2hReadBeginRequest h2h_read_begin = 205;
     H2hReadRequest h2h_read = 206;
     H2hReadEndRequest h2h_read_end = 207;
+    H2hBeginRangeRequest h2h_begin_range = 208;
   }
 }
 
@@ -224,6 +247,7 @@ message Response {
     H2hReadBeginResponse h2h_read_begin = 205;
     H2hReadResponse h2h_read = 206;
     H2hReadEndResponse h2h_read_end = 207;
+    H2hBeginRangeResponse h2h_begin_range = 208;
   }
 }
 

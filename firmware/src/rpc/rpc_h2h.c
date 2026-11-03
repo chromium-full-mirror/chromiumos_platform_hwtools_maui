@@ -11,6 +11,9 @@
  * Write session:
  *   H2hBegin  - hold PL27A1 in reset, mux the flash to the EC, check the JEDEC
  *               ID and size, clear block protection, erase the whole chip.
+ *   H2hBeginRange - the same, but erase only the 4 KB sectors of one
+ *               sector-aligned range (the rest of the flash is untouched);
+ *               the writes then start at the beginning of that range.
  *   H2hWrite  - strictly sequential chunks, programmed as they arrive. The host
  *               pipelines several writes, so USB transfer of the next chunk
  *               overlaps with programming the current one.
@@ -38,6 +41,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
+#include <zephyr/sys/util.h>
 
 LOG_MODULE_REGISTER(rpc_h2h, CONFIG_MAUI_RPC_LOG_LEVEL);
 
@@ -52,6 +56,8 @@ enum session_mode {
 static struct {
 	bool active;
 	enum session_mode mode;
+	/* Write session: flash offset of the first byte of the image. */
+	uint32_t base_offset;
 	uint32_t image_size;
 	uint32_t image_crc32;
 	uint32_t next_offset;
@@ -182,11 +188,23 @@ static maui_rpc_Status handle_info(const maui_rpc_Request *req,
 	return st;
 }
 
-static maui_rpc_Status handle_begin(const maui_rpc_Request *req,
-				    maui_rpc_Response *resp)
+/* What H2hBegin and H2hBeginRange report back. */
+struct begin_info {
+	uint32_t jedec_id;
+	uint32_t flash_size;
+	uint32_t max_chunk_size;
+};
+
+/*
+ * Start a write session for image_size bytes at offset. With full_erase the
+ * whole chip is erased, else only the sectors of [offset, offset +
+ * image_size), which must then be sector aligned.
+ */
+static maui_rpc_Status begin_write(uint32_t offset, uint32_t image_size,
+				   uint32_t image_crc32, bool full_erase,
+				   struct begin_info *out,
+				   maui_rpc_Response *resp)
 {
-	const maui_rpc_H2hBeginRequest *in = &req->msg.h2h_begin;
-	maui_rpc_H2hBeginResponse *out = &resp->msg.h2h_begin;
 	maui_rpc_Status st;
 	int rc;
 
@@ -198,8 +216,15 @@ static maui_rpc_Status handle_begin(const maui_rpc_Request *req,
 		session_end();
 	}
 
-	if (in->image_size == 0) {
+	if (image_size == 0) {
 		rpc_set_error(resp, "empty image");
+		st = maui_rpc_Status_STATUS_INVALID_ARGUMENT;
+		goto out;
+	}
+	if (!full_erase && (offset % H2H_SECTOR_SIZE != 0 ||
+			    image_size % H2H_SECTOR_SIZE != 0)) {
+		rpc_set_error(resp, "range 0x%x +%u not %u B aligned", offset,
+			      image_size, H2H_SECTOR_SIZE);
 		st = maui_rpc_Status_STATUS_INVALID_ARGUMENT;
 		goto out;
 	}
@@ -213,41 +238,52 @@ static maui_rpc_Status handle_begin(const maui_rpc_Request *req,
 	session.active = true;
 	session.mode = SESSION_WRITE;
 
-	if (in->image_size > out->flash_size) {
-		rpc_set_error(resp, "image %u B > flash %u B", in->image_size,
-			      out->flash_size);
+	if (offset > out->flash_size || image_size > out->flash_size - offset) {
+		rpc_set_error(resp, "image 0x%x +%u B > flash %u B", offset,
+			      image_size, out->flash_size);
 		st = maui_rpc_Status_STATUS_TOO_LARGE;
 		goto fail;
 	}
 
 	rc = h2h_flash_unprotect();
 	if (rc == 0) {
-		/* Full-chip erase: nothing from a previous image may survive
-		 * past the end of the new one.
-		 * TODO: measure on real hardware; on a large part erasing
-		 * only ROUND_UP(image_size, 64 KB) may be worth the trade.
-		 */
 		session.last_progress_ms = 0;
-		rc = h2h_flash_erase_cb(0, out->flash_size, erase_progress,
-					NULL);
+		if (full_erase) {
+			/* Nothing from a previous image may survive past the
+			 * end of the new one.
+			 * TODO: measure on real hardware; on a large part
+			 * erasing only ROUND_UP(image_size, 64 KB) may be worth
+			 * the trade.
+			 */
+			rc = h2h_flash_erase_cb(0, out->flash_size,
+						erase_progress, NULL);
+		} else {
+			/* Everything outside the range stays as it is. */
+			rc = h2h_flash_erase_cb(offset, image_size,
+						erase_progress, NULL);
+		}
 	}
 	if (rc != 0) {
 		st = rpc_error(resp, rc, "unprotect/erase failed (%d)", rc);
 		goto fail;
 	}
 
-	session.image_size = in->image_size;
-	session.image_crc32 = in->image_crc32;
+	session.base_offset = offset;
+	session.image_size = image_size;
+	session.image_crc32 = image_crc32;
 	session.flash_size = out->flash_size;
-	session.next_offset = 0;
+	session.next_offset = offset;
 	session.rx_crc32 = 0;
-	out->max_chunk_size = sizeof(req->msg.h2h_write.data.bytes);
-	resp->which_msg = maui_rpc_Response_h2h_begin_tag;
+	out->max_chunk_size =
+		SIZEOF_FIELD(maui_rpc_H2hWriteRequest, data.bytes);
 	session_touch();
 
-	LOG_INF("H2H flash 0x%06x (%u KB) erased in %u ms, receiving %u B",
+	LOG_INF("H2H flash 0x%06x (%u KB): %s erased in %u ms, receiving %u B "
+		"at 0x%x",
 		out->jedec_id, out->flash_size / 1024,
-		(uint32_t)(k_uptime_get() - session.start_ms), in->image_size);
+		full_erase ? "chip" : "range",
+		(uint32_t)(k_uptime_get() - session.start_ms), image_size,
+		offset);
 	goto out;
 
 fail:
@@ -257,11 +293,49 @@ out:
 	return st;
 }
 
+static maui_rpc_Status handle_begin(const maui_rpc_Request *req,
+				    maui_rpc_Response *resp)
+{
+	const maui_rpc_H2hBeginRequest *in = &req->msg.h2h_begin;
+	maui_rpc_H2hBeginResponse *out = &resp->msg.h2h_begin;
+	struct begin_info info;
+	maui_rpc_Status st;
+
+	st = begin_write(0, in->image_size, in->image_crc32, true, &info, resp);
+	if (st == maui_rpc_Status_STATUS_OK) {
+		out->jedec_id = info.jedec_id;
+		out->flash_size = info.flash_size;
+		out->max_chunk_size = info.max_chunk_size;
+		resp->which_msg = maui_rpc_Response_h2h_begin_tag;
+	}
+	return st;
+}
+
+static maui_rpc_Status handle_begin_range(const maui_rpc_Request *req,
+					  maui_rpc_Response *resp)
+{
+	const maui_rpc_H2hBeginRangeRequest *in = &req->msg.h2h_begin_range;
+	maui_rpc_H2hBeginRangeResponse *out = &resp->msg.h2h_begin_range;
+	struct begin_info info;
+	maui_rpc_Status st;
+
+	st = begin_write(in->offset, in->image_size, in->image_crc32, false,
+			 &info, resp);
+	if (st == maui_rpc_Status_STATUS_OK) {
+		out->jedec_id = info.jedec_id;
+		out->flash_size = info.flash_size;
+		out->max_chunk_size = info.max_chunk_size;
+		resp->which_msg = maui_rpc_Response_h2h_begin_range_tag;
+	}
+	return st;
+}
+
 static maui_rpc_Status handle_write(const maui_rpc_Request *req,
 				    maui_rpc_Response *resp)
 {
 	const maui_rpc_H2hWriteRequest *in = &req->msg.h2h_write;
 	maui_rpc_Status st = maui_rpc_Status_STATUS_OK;
+	uint32_t left;
 	int rc;
 
 	k_mutex_lock(&session_lock, K_FOREVER);
@@ -277,8 +351,8 @@ static maui_rpc_Status handle_write(const maui_rpc_Request *req,
 		st = maui_rpc_Status_STATUS_BAD_STATE;
 		goto fail;
 	}
-	if (in->data.size == 0 ||
-	    in->data.size > session.image_size - in->offset) {
+	left = session.base_offset + session.image_size - session.next_offset;
+	if (in->data.size == 0 || in->data.size > left) {
 		rpc_set_error(resp, "bad chunk size %u", in->data.size);
 		st = maui_rpc_Status_STATUS_INVALID_ARGUMENT;
 		goto fail;
@@ -322,9 +396,10 @@ static maui_rpc_Status handle_finish(const maui_rpc_Request *req,
 		st = maui_rpc_Status_STATUS_BAD_STATE;
 		goto out;
 	}
-	if (session.next_offset != session.image_size) {
+	if (session.next_offset - session.base_offset != session.image_size) {
 		rpc_set_error(resp, "incomplete: %u of %u B",
-			      session.next_offset, session.image_size);
+			      session.next_offset - session.base_offset,
+			      session.image_size);
 		st = maui_rpc_Status_STATUS_BAD_STATE;
 		goto end;
 	}
@@ -336,8 +411,8 @@ static maui_rpc_Status handle_finish(const maui_rpc_Request *req,
 	}
 
 	session.last_progress_ms = 0;
-	rc = h2h_flash_crc32_cb(0, session.image_size, &crc, verify_progress,
-				NULL);
+	rc = h2h_flash_crc32_cb(session.base_offset, session.image_size, &crc,
+				verify_progress, NULL);
 	if (rc != 0) {
 		st = rpc_error(resp, rc, "readback failed (%d)", rc);
 		goto end;
@@ -354,8 +429,9 @@ static maui_rpc_Status handle_finish(const maui_rpc_Request *req,
 		goto end;
 	}
 
-	LOG_INF("H2H flash programmed and verified: %u B, CRC 0x%08x, %u ms",
-		session.image_size, crc, out->duration_ms);
+	LOG_INF("H2H flash programmed and verified: %u B at 0x%x, CRC 0x%08x, "
+		"%u ms",
+		session.image_size, session.base_offset, crc, out->duration_ms);
 
 end:
 	/* Success or failure, give the flash back to the PL27A1. */
@@ -373,7 +449,8 @@ static maui_rpc_Status handle_abort(const maui_rpc_Request *req,
 	k_mutex_lock(&session_lock, K_FOREVER);
 	if (session.active && session.mode == SESSION_WRITE) {
 		LOG_WRN("H2H write session aborted by host at %u of %u B",
-			session.next_offset, session.image_size);
+			session.next_offset - session.base_offset,
+			session.image_size);
 	} else if (session.active) {
 		LOG_WRN("H2H read session aborted by host after %u B",
 			session.bytes_read);
@@ -493,6 +570,8 @@ out:
 
 RPC_HANDLER_DEFINE(h2h_info, maui_rpc_Request_h2h_info_tag, handle_info);
 RPC_HANDLER_DEFINE(h2h_begin, maui_rpc_Request_h2h_begin_tag, handle_begin);
+RPC_HANDLER_DEFINE(h2h_begin_range, maui_rpc_Request_h2h_begin_range_tag,
+		   handle_begin_range);
 RPC_HANDLER_DEFINE(h2h_write, maui_rpc_Request_h2h_write_tag, handle_write);
 RPC_HANDLER_DEFINE(h2h_finish, maui_rpc_Request_h2h_finish_tag, handle_finish);
 RPC_HANDLER_DEFINE(h2h_abort, maui_rpc_Request_h2h_abort_tag, handle_abort);

@@ -268,6 +268,12 @@ verifies a CRC-32 read back over SPI, then releases the bridge:
 ./tools/scripts/maui-flash h2h --info     # JEDEC ID and size only
 ```
 
+`H2hBeginRange` (request 208) is the same write session, but it erases only the
+4 KB sectors of one sector-aligned range and leaves the rest of the flash
+untouched. `maui-flash h2h-serial` uses it to rewrite only the first sector,
+which holds the USB serial number. Hosts must check that the firmware supports
+it (`supported_requests` in `Ping`) before using it.
+
 The `h2h_flash` shell commands on ACM0 remain available for manual debugging;
 they are refused while an RPC flashing session owns the flash.
 

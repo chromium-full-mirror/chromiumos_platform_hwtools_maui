@@ -12,6 +12,9 @@
 
 #include <sys/types.h>
 
+/** Smallest erasable unit of the H2H SPI NOR flash (4 KB sector erase). */
+#define H2H_SECTOR_SIZE 4096
+
 /**
  * Progress callback: @p done of @p total bytes processed. Return 0 to go on,
  * or a negative errno to stop the operation, which then returns that value.

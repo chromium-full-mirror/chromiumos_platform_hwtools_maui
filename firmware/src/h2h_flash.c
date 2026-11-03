@@ -41,7 +41,6 @@ LOG_MODULE_REGISTER(h2h_flash);
 #define SPI_SR_PROTECT_MASK 0xBC
 
 #define H2H_PAGE_SIZE 256
-#define H2H_SECTOR_SIZE 4096
 #define H2H_BLOCK_SIZE 65536
 /* 3-byte addressing only (READ 0x03 / PP 0x02 / SE 0x20). */
 #define H2H_MAX_FLASH_SIZE (16U * 1024U * 1024U)
