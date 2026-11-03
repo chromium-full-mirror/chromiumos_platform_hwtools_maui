@@ -159,6 +159,67 @@ reading:
 ./tools/scripts/maui-flash --serial <SERIAL> h2h --read full.bin --size 524288
 ```
 
+#### H2H Bridge Serial Number (IT82002)
+
+The unit serial number lives in the PL27A1 image as the bridge's USB iSerial.
+In mass production every board gets the same pre-burned image and the station
+writes the serial after SMT. `--serial`/`--port` select the board (its MCU), not
+the H2H serial.
+
+```bash
+# Read: the serial in the H2H flash, checked against the iSerial on USB.
+./tools/scripts/maui-flash h2h-serial --get
+# Only read the iSerial on USB (does not touch the flash or reset the bridge).
+./tools/scripts/maui-flash h2h-serial --get --usb-only
+
+# Write: patch the serial into the image in the flash, then flash and verify it,
+# read it back, reset the bridge and confirm the new iSerial on USB.
+./tools/scripts/maui-flash h2h-serial --set MAUIV12H26110042
+# Patch a base image file instead (e.g. for a board with a blank flash).
+./tools/scripts/maui-flash h2h-serial --set MAUIV12H26110042 --file pl27a1.bin
+```
+
+The serial must be `MAUIV` + 2-digit HW version + batch letter + `YYMM` + 4
+digits, e.g. `MAUIV12H26010001` (v1.2, batch H, January 2026, unit 0001). The
+serial and the base image (a whole 8704-byte PL27A1 image with the serial
+descriptor at 0x38) are validated before anything is erased. The image has no
+checksum and only the serial descriptor changes. NOR flash cannot rewrite bytes
+in place, so the smallest write is one 4 KB sector: with an MCU App that
+supports `h2h_begin_range`, only the first sector (0x0000-0x0fff) is erased and
+rewritten and the rest of the flash is untouched. Older MCU Apps fall back to
+erasing the whole chip and writing the whole 8704-byte image (`--full-erase`
+forces that). If the flash already holds the patched image, it is not
+rewritten: the command only checks the iSerial (`--force` rewrites it). A board
+can only be written while its MCU App supports H2H over RPC.
+
+With several boards connected, each command uses the board selected with
+`--port` (or `--serial`, if the boards' serials differ) and only that board's
+bridge: the bridge is matched to the MCU by its position on the board's USB
+hub. `--get --usb-only` also works on boards whose MCU App has no RPC port. A
+failed flash write is retried once.
+
+For automation, `--json` prints exactly one JSON object on stdout (schema
+`maui.h2h_serial.v1`; logs and progress go to stderr), also for command-line
+errors (exit code 2). Its fields include `success`, `exit_code`, `message`,
+`flash_serial`, `previous_serial`, `usb_serial`, `write_mode` (`none` /
+`sectors` / `chip`), `write_range`, `write_attempts` and `flash_state`.
+`flash_state` is `untouched` (the old image is intact), `written`, or
+`unknown` (the flash may be erased: write it again with `--file`). Exit codes:
+
+| Code | Name                  | Meaning                                       |
+| ---- | --------------------- | --------------------------------------------- |
+| 0    | `OK`                  | Done.                                         |
+| 1    | `ERROR`               | Unexpected error.                             |
+| 2    | `USAGE`               | Bad command line.                             |
+| 3    | `INVALID_SERIAL`      | Bad serial format; nothing touched.           |
+| 4    | `INVALID_IMAGE`       | Base image unusable; nothing erased.          |
+| 5    | `DEVICE_ERROR`        | No RPC port, RPC failure, MCU App too old.    |
+| 6    | `FLASH_FAILED`        | Erase/program/CRC-32 failed; flash may be erased. |
+| 7    | `VERIFY_FAILED`       | Read-back failed or differs from the image.   |
+| 8    | `BRIDGE_NOT_FOUND`    | Bridge did not enumerate after its reset.     |
+| 9    | `USB_SERIAL_MISMATCH` | Bridge enumerated with another iSerial.       |
+| 130  | `INTERRUPTED`         | Interrupted (Ctrl-C).                         |
+
 ## Transport & Device Discovery Architecture
 
 The `maui_libs.transport` module manages low-level serial communication and handles hardware differences across board generations:
@@ -181,6 +242,7 @@ The `maui_libs.transport` module manages low-level serial communication and hand
     *   `pdc.py`: Logic for PDC firmware updates.
     *   `rpc.py`: Client for the IT82002 "Maui RPC" channel (COBS + Protobuf, `firmware/proto/maui_rpc.proto`).
     *   `h2h.py`: H2H bridge SPI flash reading and programming over RPC.
+    *   `h2h_serial.py`, `h2h_serial_cli.py`: H2H serial number read/write (`maui-flash h2h-serial`).
     *   `proto/`: Generated Protobuf modules; regenerate with `tools/scripts/gen_proto.sh`.
     *   `cli.py`: Common CLI argument parsing and logging setup.
 *   `tools/src/`: CLI entry points (`maui_ctl.py`, `maui_flash.py`).
@@ -194,6 +256,9 @@ You can run the unit tests inside the Docker container:
 ```bash
 docker run --rm -v $(pwd):/repo -w /repo maui-utils \
     python3 -m unittest discover tools/tests
+# tools/tests/unit (not a package):
+docker run --rm -v $(pwd)/tools:/t -w /t -e PYTHONPATH=/t maui-utils \
+    python3 -m unittest discover -s tests/unit -t tests/unit
 ```
 
 ### Release Process

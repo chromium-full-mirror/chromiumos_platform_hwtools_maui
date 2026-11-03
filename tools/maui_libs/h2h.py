@@ -5,9 +5,10 @@
 """Prolific PL27A1 H2H bridge SPI flash access over the Maui RPC channel.
 
 The MCU holds the PL27A1 in reset and muxes its SPI NOR flash to itself for
-the duration of a session. Writing erases the whole chip, programs the image
-as it streams in and verifies it with a CRC-32 computed on the MCU (no
-read-back over USB). Reading streams the flash back in chunks. See the "h2h"
+the duration of a session. Writing erases the whole chip (or, with
+h2h_begin_range, only the 4 KB sectors of one range), programs the image as it
+streams in and verifies it with a CRC-32 computed on the MCU (no read-back over
+USB). Reading streams the flash back in chunks. See the "h2h"
 section of firmware/proto/maui_rpc.proto.
 """
 
@@ -34,6 +35,9 @@ DEFAULT_WINDOW = 3
 
 # Size of a Prolific PL27A1 configuration image.
 H2H_IMAGE_SIZE = 8704
+
+# Erase unit of the H2H SPI flash; flash(offset=...) ranges must be aligned.
+H2H_SECTOR_SIZE = 4096
 
 # H2hBegin erases the whole chip: a 16 MB part takes ~40-100 s typically and
 # far longer at datasheet worst case.
@@ -95,21 +99,40 @@ class H2hFlasher:
                 "update the MCU firmware first."
             )
 
+    def supports(self, request: str) -> bool:
+        """True if the firmware implements the given H2H request."""
+        return self._rpc.supports(request)
+
     def info(self) -> H2hFlashInfo:
         """Reads the flash JEDEC ID and size (briefly resets the PL27A1)."""
         resp = self._rpc.call(pb.Request(h2h_info=pb.H2hInfoRequest()))
         return H2hFlashInfo(resp.h2h_info.jedec_id, resp.h2h_info.flash_size)
 
     def flash(
-        self, image: bytes, progress: Optional[ProgressCallback] = None
+        self,
+        image: bytes,
+        progress: Optional[ProgressCallback] = None,
+        offset: Optional[int] = None,
     ) -> H2hFlashResult:
-        """Erases the whole flash, writes image at offset 0 and verifies it.
+        """Writes image to the flash and verifies it.
+
+        With offset None the whole flash is erased and image is written at
+        offset 0 (h2h_begin). Otherwise only the sectors of [offset, offset +
+        len(image)) are erased and rewritten (h2h_begin_range; both must be
+        multiples of H2H_SECTOR_SIZE) and the rest of the flash is untouched.
 
         On any failure the session is aborted so the PL27A1 is released from
         reset, and the exception is re-raised.
         """
         if not image:
             raise ValueError("H2H image is empty")
+        if offset is not None and (
+            offset < 0 or offset % H2H_SECTOR_SIZE or len(image) % H2H_SECTOR_SIZE
+        ):
+            raise ValueError(
+                f"H2H range 0x{offset:x}+{len(image)} is not "
+                f"{H2H_SECTOR_SIZE} B aligned"
+            )
 
         crc = zlib.crc32(image) & 0xFFFFFFFF
         total = len(image)
@@ -122,16 +145,27 @@ class H2hFlasher:
 
         self._rpc.on_event("h2h_progress", on_event)
         try:
-            begin = self._rpc.call(
-                pb.Request(
+            if offset is None:
+                req = pb.Request(
                     h2h_begin=pb.H2hBeginRequest(image_size=total, image_crc32=crc)
-                ),
-                timeout=BEGIN_TIMEOUT,
-            ).h2h_begin
+                )
+            else:
+                req = pb.Request(
+                    h2h_begin_range=pb.H2hBeginRangeRequest(
+                        offset=offset, image_size=total, image_crc32=crc
+                    )
+                )
+            resp = self._rpc.call(req, timeout=BEGIN_TIMEOUT)
+            begin = resp.h2h_begin if offset is None else resp.h2h_begin_range
             info = H2hFlashInfo(begin.jedec_id, begin.flash_size)
-            logger.info("H2H flash: %s (erased)", info)
+            if offset is None:
+                logger.info("H2H flash: %s (erased)", info)
+            else:
+                logger.info(
+                    "H2H flash: %s (0x%x-0x%x erased)", info, offset, offset + total - 1
+                )
 
-            self._stream(image, begin.max_chunk_size, progress)
+            self._stream(image, begin.max_chunk_size, progress, base=offset or 0)
 
             fin = self._rpc.call(
                 pb.Request(h2h_finish=pb.H2hFinishRequest()),
@@ -159,8 +193,15 @@ class H2hFlasher:
             host_s=time.monotonic() - start,
         )
 
-    def _stream(self, image: bytes, chunk: int, progress: Optional[ProgressCallback]):
-        """Pipelined sequential writes, at most self._window in flight."""
+    def _stream(
+        self,
+        image: bytes,
+        chunk: int,
+        progress: Optional[ProgressCallback],
+        base: int = 0,
+    ):
+        """Pipelined sequential writes from flash offset base, at most
+        self._window in flight."""
         if chunk <= 0:
             raise RuntimeError(f"firmware reported invalid chunk size {chunk}")
 
@@ -180,7 +221,7 @@ class H2hFlasher:
                     progress("program", acked, total)
             req = pb.Request(
                 h2h_write=pb.H2hWriteRequest(
-                    offset=offset, data=image[offset : offset + chunk]
+                    offset=base + offset, data=image[offset : offset + chunk]
                 )
             )
             in_flight.append((self._rpc.call_async(req), req))

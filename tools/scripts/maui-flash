@@ -15,6 +15,7 @@ MANAGER="${SCRIPT_DIR}/maui_image_manager.py"
 MANAGER_ARGS=()
 TOOL_ARGS=()
 VERSION_MODE=0
+JSON_MODE=0
 
 while [[ $# -gt 0 ]]; do
     key="$1"
@@ -36,6 +37,11 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --fw_channel=*)
+            TOOL_ARGS+=("$1")
+            shift
+            ;;
+        --json)
+            JSON_MODE=1
             TOOL_ARGS+=("$1")
             shift
             ;;
@@ -91,8 +97,9 @@ for arg in "${TOOL_ARGS[@]}"; do
             cp "$arg" "$HOST_TMP_DIR/$FILE_NAME"
             CMD_ARGS+=("$CONTAINER_MOUNT_POINT/$FILE_NAME")
         else
-            echo "Error: File not found: $arg"
-            exit 1
+            # Let the tool report it (h2h-serial --json prints a JSON error).
+            echo "Warning: File not found: $arg" >&2
+            CMD_ARGS+=("$arg")
         fi
         FILE_ARG_NEXT=0
     elif [[ "$arg" == "--file="* ]]; then
@@ -103,8 +110,8 @@ for arg in "${TOOL_ARGS[@]}"; do
             cp "$FILE_PATH" "$HOST_TMP_DIR/$FILE_NAME"
             CMD_ARGS+=("--file" "$CONTAINER_MOUNT_POINT/$FILE_NAME")
         else
-            echo "Error: File not found: $FILE_PATH"
-            exit 1
+            echo "Warning: File not found: $FILE_PATH" >&2
+            CMD_ARGS+=("--file" "$FILE_PATH")
         fi
     elif [ "$arg" == "--file" ]; then
         CMD_ARGS+=("$arg")
@@ -120,8 +127,14 @@ for arg in "${TOOL_ARGS[@]}"; do
     fi
 done
 
-# Run maui-flash inside the container
-docker run --rm -it \
+# Run maui-flash inside the container. Only allocate a TTY when run from a
+# terminal and not with --json: a TTY merges stderr into stdout (which breaks
+# --json consumers) and `docker run -t` fails when stdin is not a terminal.
+DOCKER_TTY_ARGS=(-i)
+if [ "$JSON_MODE" -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then
+    DOCKER_TTY_ARGS=(-it)
+fi
+docker run --rm "${DOCKER_TTY_ARGS[@]}" \
     --privileged \
     -v /dev:/dev \
     -v "$HOST_TMP_DIR:$CONTAINER_MOUNT_POINT" \
@@ -131,5 +144,5 @@ docker run --rm -it \
 # Copy an output file back to the requested host path
 if [ -n "$OUT_HOST_PATH" ]; then
     cp "$HOST_TMP_DIR/$(basename "$OUT_HOST_PATH")" "$OUT_HOST_PATH"
-    echo "Saved $OUT_HOST_PATH"
+    echo "Saved $OUT_HOST_PATH" >&2
 fi

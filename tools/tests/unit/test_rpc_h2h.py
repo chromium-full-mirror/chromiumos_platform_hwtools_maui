@@ -25,6 +25,7 @@ import serial
 FLASH_SIZE = 64 * 1024
 JEDEC_ID = 0xEF4010
 CHUNK = 4096
+SECTOR = 4096
 
 
 class FakeDevice:  # pylint: disable=too-few-public-methods
@@ -51,16 +52,8 @@ class FakeDevice:  # pylint: disable=too-few-public-methods
         elif name == "h2h_info":
             resp.h2h_info.jedec_id = JEDEC_ID
             resp.h2h_info.flash_size = FLASH_SIZE
-        elif name == "h2h_begin":
-            if req.h2h_begin.image_size > FLASH_SIZE:
-                return pb.Response(
-                    status=pb.STATUS_TOO_LARGE, error="too large", error_code=-27
-                )
-            self.flash[:] = b"\xff" * FLASH_SIZE
-            self.session = {"req": req.h2h_begin, "next": 0}
-            resp.h2h_begin.jedec_id = JEDEC_ID
-            resp.h2h_begin.flash_size = FLASH_SIZE
-            resp.h2h_begin.max_chunk_size = CHUNK
+        elif name.startswith("h2h_begin"):
+            return self._handle_begin(name, req, resp)
         elif name.startswith("h2h_read"):
             return self._handle_read(name, req, resp)
         elif name == "h2h_write":
@@ -75,8 +68,8 @@ class FakeDevice:  # pylint: disable=too-few-public-methods
             self.session["next"] += len(data)
             resp.h2h_write.SetInParent()
         elif name == "h2h_finish":
-            size = self.session["req"].image_size
-            crc = zlib.crc32(self.flash[:size]) & 0xFFFFFFFF
+            base, size = self.session["base"], self.session["req"].image_size
+            crc = zlib.crc32(self.flash[base : base + size]) & 0xFFFFFFFF
             expected = self.session["req"].image_crc32
             self.session = None
             resp.h2h_finish.flash_crc32 = crc
@@ -89,6 +82,30 @@ class FakeDevice:  # pylint: disable=too-few-public-methods
             resp.h2h_abort.SetInParent()
         else:
             resp.status = pb.STATUS_UNSUPPORTED
+        return resp
+
+    def _handle_begin(self, name, req, resp):
+        """h2h_begin (chip erase) and h2h_begin_range (sector erase)."""
+        if name == "h2h_begin":
+            r = req.h2h_begin
+            if r.image_size > FLASH_SIZE:
+                return pb.Response(
+                    status=pb.STATUS_TOO_LARGE, error="too large", error_code=-27
+                )
+            self.flash[:] = b"\xff" * FLASH_SIZE
+            base, out = 0, resp.h2h_begin
+        else:
+            r = req.h2h_begin_range
+            if r.offset % SECTOR or r.image_size % SECTOR or not r.image_size:
+                return pb.Response(status=pb.STATUS_INVALID_ARGUMENT, error="align")
+            if r.offset > FLASH_SIZE or r.image_size > FLASH_SIZE - r.offset:
+                return pb.Response(status=pb.STATUS_TOO_LARGE, error="too large")
+            self.flash[r.offset : r.offset + r.image_size] = b"\xff" * r.image_size
+            base, out = r.offset, resp.h2h_begin_range
+        self.session = {"req": r, "base": base, "next": base}
+        out.jedec_id = JEDEC_ID
+        out.flash_size = FLASH_SIZE
+        out.max_chunk_size = CHUNK
         return resp
 
     def _handle_read(self, name, req, resp):
@@ -248,6 +265,42 @@ class RpcH2hTest(unittest.TestCase):
         self.assertLessEqual({"erase", "program"}, phases)
         self.assertEqual(self.device.requests.count("h2h_write"), 4)
         self.assertEqual(self.device.requests[-1], "h2h_finish")
+
+    def test_h2h_flash_range(self):
+        """offset= rewrites only that sector range (h2h_begin_range)."""
+        old = bytes((i * 13 + 5) & 0xFF for i in range(FLASH_SIZE))
+        self.device.flash[:] = old
+        data = bytes((i * 3) & 0xFF for i in range(2 * SECTOR))
+        with RpcClient("/dev/fake") as client:
+            flasher = H2hFlasher(client)
+            self.assertTrue(flasher.supports("h2h_begin_range"))
+            result = flasher.flash(data, offset=SECTOR)
+        self.assertEqual(result.crc32, zlib.crc32(data))
+        self.assertEqual(bytes(self.device.flash[SECTOR : 3 * SECTOR]), data)
+        self.assertEqual(self.device.flash[:SECTOR], old[:SECTOR])
+        self.assertEqual(self.device.flash[3 * SECTOR :], old[3 * SECTOR :])
+        self.assertIn("h2h_begin_range", self.device.requests)
+        self.assertNotIn("h2h_begin", self.device.requests)
+        self.assertEqual(self.device.requests[-1], "h2h_finish")
+
+    def test_h2h_flash_range_must_be_aligned(self):
+        """A misaligned range is rejected before anything is sent."""
+        with RpcClient("/dev/fake") as client:
+            flasher = H2hFlasher(client)
+            for offset, size in ((0, SECTOR + 1), (512, SECTOR), (-SECTOR, SECTOR)):
+                with self.subTest(offset=offset, size=size):
+                    with self.assertRaises(ValueError):
+                        flasher.flash(bytes(size), offset=offset)
+        self.assertEqual(self.device.requests, [])
+
+    def test_h2h_flash_range_past_the_end(self):
+        """A range past the end of the flash is TOO_LARGE and aborted."""
+        with RpcClient("/dev/fake") as client:
+            with self.assertRaises(RpcError) as err:
+                H2hFlasher(client).flash(bytes(2 * SECTOR), offset=FLASH_SIZE - SECTOR)
+        self.assertEqual(err.exception.status, pb.STATUS_TOO_LARGE)
+        self.assertNotIn("h2h_write", self.device.requests)
+        self.assertEqual(self.device.requests[-1], "h2h_abort")
 
     def test_h2h_verify_failure_raises(self):
         """A flash CRC mismatch is reported as RpcError(VERIFY_FAILED)."""

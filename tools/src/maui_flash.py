@@ -26,6 +26,7 @@ import xml.etree.ElementTree as ET
 import zlib
 
 from maui_libs import cli
+from maui_libs import h2h_serial_cli
 from maui_libs.device import MauiDevice
 from maui_libs.h2h import H2H_IMAGE_SIZE
 from maui_libs.h2h import H2hFlasher
@@ -906,6 +907,10 @@ def main():
         help="RPC port of the device (default: auto-detect the 'Maui RPC' port)",
     )
 
+    h2h_serial_cli.json_usage_errors(
+        sys.argv[1:], parser, h2h_serial_cli.add_parser(subparsers)
+    )
+
     # Serial Number (NVS) subcommand
     sn_parser = subparsers.add_parser(
         "serial", help="Read or write persistent USB serial number in NVS flash"
@@ -943,6 +948,9 @@ def main():
     if args.component == "h2h":
         handle_h2h(args)
         return
+    if args.component == h2h_serial_cli.COMMAND:
+        h2h_serial_cli.check_args(parser, args)
+        sys.exit(h2h_serial_cli.handle(args, progress=_H2hProgressPrinter()))
 
     device = None
     try:
