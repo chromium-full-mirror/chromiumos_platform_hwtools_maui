@@ -198,30 +198,6 @@
 			gpios = <&gpiog 4 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
 		};
 
-		usb3_mux_flash_hub_dut_sel_r: usb3_mux_flash_hub_dut_sel_r {
-			gpios = <&gpiob 2 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
-		};
-
-		usb2_mux_flash_sel: usb2_mux_flash_sel {
-			gpios = <&gpioh 2 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
-		};
-
-		cc_logic_en: cc_logic_en {
-			gpios = <&gpioh 1 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
-		};
-
-		usb2_mux_flash_oe_l: usb2_mux_flash_oe_l {
-			gpios = <&gpiob 5 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
-		};
-
-		pp5000_c_en: pp5000_c_en {
-			gpios = <&gpiom 5 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
-		};
-
-		usb3_mux_flash_hub_dut_oe_r_l: usb3_mux_flash_hub_dut_oe_r_l {
-			gpios = <&gpiof 6 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
-		};
-
 		/* ==================== Digital Inputs ==================== */
 
 		i2c_temp_alert: i2c_temp_alert {
@@ -335,14 +311,29 @@
 		ec_adc_pp5000: ec_adc_pp5000 {
 			gpios = <&gpioe 5 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
 		};
+	};
 
-		usb3_mux_flash_dfp_oe_l: usb3_mux_flash_dfp_oe_l {
-			gpios = <&gpiof 1 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
-		};
+	pendrive: pendrive {
+		compatible = "google,maui-pendrive";
+		/* usb3_mux_flash_dfp_sel */
+		cc-pol-gpios = <&gpioe 6 (GPIO_ACTIVE_HIGH)>;
+		/* usb3_mux_flash_dfp_oe_l */
+		cc-det-gpios = <&gpiof 1 (GPIO_ACTIVE_LOW)>;
 
-		usb3_mux_flash_dfp_sel: usb3_mux_flash_dfp_sel {
-			gpios = <&gpioe 6 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
-		};
+		/* usb2_mux_flash_oe_l */
+		usb2-oe-gpios = <&gpiob 5 (GPIO_ACTIVE_LOW)>;
+		/* usb2_mux_flash_sel */
+		usb2-sel-gpios = <&gpioh 2 (GPIO_ACTIVE_HIGH)>;
+
+		/* usb3_mux_flash_hub_dut_oe_r_l */
+		usb3-oe-gpios = <&gpiof 6 (GPIO_ACTIVE_LOW)>;
+		/* usb3_mux_flash_hub_dut_sel_r */
+		usb3-sel-gpios = <&gpiob 2 (GPIO_ACTIVE_HIGH)>;
+
+		/* pp5000_c_en */
+		vbus-en-gpios = <&gpiom 5 (GPIO_ACTIVE_HIGH)>;
+		/* cc_logic_en */
+		cc-en-gpios = <&gpioh 1 (GPIO_ACTIVE_HIGH)>;
 	};
 };
 

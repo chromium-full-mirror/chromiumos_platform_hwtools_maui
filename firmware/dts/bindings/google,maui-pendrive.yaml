@@ -1,0 +1,42 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+description: Google MAUI USB-C pendrive port
+
+compatible: "google,maui-pendrive"
+
+include: base.yaml
+
+properties:
+  cc-pol-gpios:
+    type: phandle-array
+    required: true
+
+  cc-det-gpios:
+    type: phandle-array
+    required: true
+
+  usb2-oe-gpios:
+    type: phandle-array
+    required: true
+
+  usb2-sel-gpios:
+    type: phandle-array
+    required: true
+
+  usb3-oe-gpios:
+    type: phandle-array
+    required: true
+
+  usb3-sel-gpios:
+    type: phandle-array
+    required: true
+
+  vbus-en-gpios:
+    type: phandle-array
+    required: true
+
+  cc-en-gpios:
+    type: phandle-array
+    required: true

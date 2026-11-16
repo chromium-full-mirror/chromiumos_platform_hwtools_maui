@@ -65,6 +65,10 @@ if(CONFIG_MAUI_H2H_FLASH)
 	target_sources(app PRIVATE src/h2h_flash.c)
 endif()
 
+if(CONFIG_MAUI_PENDRIVE)
+	target_sources(app PRIVATE src/pendrive.c)
+endif()
+
 target_sources(app PRIVATE
 	src/bypass.c
 	src/commands.c

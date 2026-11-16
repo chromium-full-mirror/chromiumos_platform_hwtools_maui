@@ -74,6 +74,12 @@ config MAUI_H2H_FLASH
 	  shell commands. Only boards with the EC-side SPI bus and flash mux
 	  wired up support this.
 
+config MAUI_PENDRIVE
+	bool "Support for USB-C port for pendrive"
+	default y if BOARD_MAUI_V2P0_IT82002
+	help
+	  Enables support for handling USB-C muxes and detection logic
+
 config GPIO_INIT_PRIORITY
 	int "GPIO subsystem init priority"
 	default 89
