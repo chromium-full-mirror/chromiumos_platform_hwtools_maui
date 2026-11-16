@@ -198,14 +198,6 @@
 			gpios = <&gpiog 4 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
 		};
 
-		usb3_mux_flash_dfp_oe_l: usb3_mux_flash_dfp_oe_l {
-			gpios = <&gpiof 1 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW)>;
-		};
-
-		usb3_mux_flash_dfp_sel: usb3_mux_flash_dfp_sel {
-			gpios = <&gpioe 6 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
-		};
-
 		usb3_mux_flash_hub_dut_sel_r: usb3_mux_flash_hub_dut_sel_r {
 			gpios = <&gpiob 2 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
 		};
@@ -342,6 +334,14 @@
 
 		ec_adc_pp5000: ec_adc_pp5000 {
 			gpios = <&gpioe 5 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
+		};
+
+		usb3_mux_flash_dfp_oe_l: usb3_mux_flash_dfp_oe_l {
+			gpios = <&gpiof 1 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;
+		};
+
+		usb3_mux_flash_dfp_sel: usb3_mux_flash_dfp_sel {
+			gpios = <&gpioe 6 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
 		};
 	};
 };
