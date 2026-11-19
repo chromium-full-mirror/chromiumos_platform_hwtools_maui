@@ -151,8 +151,8 @@
 		};
 
 		usb3_mux_dut_sel: usb3_mux_dut_sel_r {
-			/* Pin M11: TACH0A/GPD6 -> USB3_MUX_DUT_SEL */
-			gpios = <&gpiod 6 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+			/* Pin M11: TACH0A/GPD6 -> USB3_MUX_DUT_SEL (1 = U10 to H2H) */
+			gpios = <&gpiod 6 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_HIGH)>;
 		};
 
 		usb2_mux_dut_oe: usb2_mux_dut_oe_r_l {
@@ -182,20 +182,29 @@
 			gpios = <&gpioe 3 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
 		};
 
+		/*
+		 * 4-pin hardware rework: move all U0811/U0812 mux controls off
+		 * the FSPI pin group (GPG3/4/5/7) onto GPD1/2/3 (repurposed
+		 * from disconnected PDC_GPIO9/10/11) and GPG0.
+		 */
 		usb2_dut_hub_sel: usb2_dut_hub_sel {
-			gpios = <&gpiog 5 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+			/* Pin E2: SSCE1#/GPG0 -> USB2_DUT_HUB_SEL (1 = U0811 to U9/H2H) */
+			gpios = <&gpiog 0 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_HIGH)>;
 		};
 
 		usb3_dut_hub_oe_l: usb3_dut_hub_oe_l {
-			gpios = <&gpiog 3 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+			/* Pin N3: RI2#/GPD1 -> USB3_DUT_HUB_OE_L (0V = U0812 ON) */
+			gpios = <&gpiod 1 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
 		};
 
 		usb2_dut_hub_oe_l: usb2_dut_hub_oe_l {
-			gpios = <&gpiog 7 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
+			/* Pin N4: ECSCI#/GPD3 -> USB2_DUT_HUB_OE_L (0V = U0811 ON) */
+			gpios = <&gpiod 3 (GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_LOW)>;
 		};
 
 		usb3_dut_hub_sel: usb3_dut_hub_sel {
-			gpios = <&gpiog 4 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
+			/* Pin M4: ERST#/LPCRST#/GPD2 -> USB3_DUT_HUB_SEL (0V = U0812 to U10/H2H) */
+			gpios = <&gpiod 2 (GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH)>;
 		};
 
 		/* ==================== Digital Inputs ==================== */
@@ -281,20 +290,11 @@
 			gpios = <&gpiom 6 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
 		};
 
-		pdc_gpio9: pdc_gpio9 {
-			/* Pin N3: RI2#/GPD1 -> PDC_GPIO9 */
-			gpios = <&gpiod 1 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
-		};
-
-		pdc_gpio10: pdc_gpio10 {
-			/* Pin M4: ERST#/LPCRST#/GPD2 -> PDC_GPIO10 */
-			gpios = <&gpiod 2 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
-		};
-
-		pdc_gpio11: pdc_gpio11 {
-			/* Pin N4: ECSCI#/GPD3 -> PDC_GPIO11 */
-			gpios = <&gpiod 3 (GPIO_INPUT | GPIO_ACTIVE_HIGH)>;
-		};
+		/*
+		 * PDC_GPIO9/10/11 (GPD1/GPD2/GPD3) are disconnected by the
+		 * 4-pin rework and reassigned above to USB3_DUT_HUB_OE_L,
+		 * USB3_DUT_HUB_SEL, and USB2_DUT_HUB_OE_L.
+		 */
 
 		dfp_ld_det_l: dfp_ld_det_l {
 			gpios = <&gpioc 6 (GPIO_INPUT | GPIO_ACTIVE_LOW)>;

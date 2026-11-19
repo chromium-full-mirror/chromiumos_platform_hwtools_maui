@@ -9,9 +9,27 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+#include <zephyr/sys/sys_io.h>
+#include <zephyr/sys/util.h>
+#endif
 #include "gpio.h"
 
 LOG_MODULE_REGISTER(gpio);
+
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+/*
+ * ITE IT82002 SMFI Flash Control Register 3 (FLHCTRL3R, datasheet 6.4.4.32):
+ *   Offset 0x63 from flashctrl (0x00F01000) -> 0x00F01063
+ *   Bit 0 (FFSPITRI): 1 = force external FSPI pins (GPG3/4/5/7) into Hi-Z
+ *   tri-state; other bits (e.g. SIFE) are preserved via read-modify-write.
+ */
+#define IT82002_SMFI_FLHCTRL3R (DT_REG_ADDR(DT_NODELABEL(flashctrl)) + 0x63U)
+#define IT82002_SMFI_FFSPITRI BIT(0)
+
+BUILD_ASSERT(IT82002_SMFI_FLHCTRL3R == 0x00F01063U,
+	     "Unexpected IT82002 SMFI FLHCTRL3R address");
+#endif
 
 #define DT_DRV_COMPAT google_maui_gpios
 
@@ -95,6 +113,17 @@ int gpio_set(enum gpio_t gpio_id, int val)
 static int gpios_init(const struct device *dev)
 {
 	int rv;
+
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+	/*
+	 * Tri-state the unused external FSPI pins (GPG3/4/5/7 = FSCE#/FMOSI/
+	 * FMISO/FSCK) into Hi-Z before driving GPD1/2/3 and GPG0 as outputs
+	 * (4-pin U0811/U0812 rework). Zero impact on internal eFlash XIP,
+	 * NVS writes, or MCUboot updates.
+	 */
+	sys_write8(sys_read8(IT82002_SMFI_FLHCTRL3R) | IT82002_SMFI_FFSPITRI,
+		   IT82002_SMFI_FLHCTRL3R);
+#endif
 
 	for (unsigned a = 0; a < ARRAY_SIZE(drv_gpios); a++) {
 		struct gpio_dt_spec_ext *gp = &drv_gpios[a];
