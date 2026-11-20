@@ -4,6 +4,7 @@
  */
 
 #include "gpio.h"
+#include "h2h.h"
 #include "h2h_flash.h"
 
 #include <errno.h>
@@ -199,7 +200,10 @@ static int bus_on(void)
 {
 #if defined(CONFIG_BOARD_MAUI_V1P2_IT82002) || defined(CONFIG_BOARD_MAUI_V2P0_IT82002)
 	/* 1. Hold Prolific PL27A1 in reset (H2H_RESET_L = active/low) */
-	(void)gpio_set(GPIO_H2H_RESET_L, 1);
+	int rc = h2h_reset_hold(H2H_RESET_CLIENT_FLASH);
+	if (rc < 0) {
+		return rc;
+	}
 	k_msleep(10);
 
 	/* 2. Deassert SPI Flash WP# and HOLD# (logical 0 = physical HIGH) */
@@ -233,7 +237,7 @@ static int bus_off(void)
 	k_msleep(5);
 
 	/* 2. Release Prolific PL27A1 reset so it boots from SPI flash */
-	(void)gpio_set(GPIO_H2H_RESET_L, 0);
+	(void)h2h_reset_release(H2H_RESET_CLIENT_FLASH);
 
 	LOG_INF("H2H SPI flash bus released to PL27A1");
 	return 0;
@@ -587,7 +591,17 @@ static int cmd_h2h_release(const struct shell *sh, size_t argc, char **argv)
 
 	int rc = h2h_bus_release(H2H_OWNER_SHELL);
 	if (rc == 0) {
-		shell_print(sh, "H2H SPI bus released (PL27A1 running)");
+		uint32_t holders = h2h_reset_holders();
+
+		if (holders != 0) {
+			shell_print(
+				sh,
+				"H2H SPI bus released (PL27A1 still held in reset, holders=0x%x)",
+				(unsigned int)holders);
+		} else {
+			shell_print(sh,
+				    "H2H SPI bus released (PL27A1 running)");
+		}
 	} else if (rc == -EBUSY) {
 		shell_error(sh, "H2H flash is busy (RPC flashing session)");
 	} else {

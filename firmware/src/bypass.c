@@ -5,6 +5,7 @@
 
 #include "bypass.h"
 #include "gpio.h"
+#include "h2h.h"
 #include "hwrev.h"
 
 #include <zephyr/logging/log.h>
@@ -13,6 +14,41 @@ LOG_MODULE_REGISTER(bypass);
 
 #define BYPASS_HWREV_MIN_REQUIRED 1
 
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+/*
+ * On Maui v2.0, U0811 (USB2) and U0812 (USB3) are the Stage-1 DUT bypass muxes
+ * routing the DUT either directly to Hub DN3 (Direct Device Mode) or onward to
+ * Stage-2 U9/U10 (H2H / USB-C flash). U9/U10 and U1/U18 are owned by
+ * pendrive.c.
+ */
+#define USB2_DUT_HUB_SEL_DIRECT 0
+#define USB2_DUT_HUB_SEL_H2H 1
+
+#define USB3_DUT_HUB_SEL_DIRECT 1
+#define USB3_DUT_HUB_SEL_H2H 0
+
+static void bypass_route_muxes(enum bypass_mode_t mode)
+{
+	int output_enable = (mode != BYPASS_MODE_DISCONNECTED);
+
+	if (mode == BYPASS_MODE_DIRECT) {
+		gpio_set(GPIO_USB2_DUT_HUB_SEL, USB2_DUT_HUB_SEL_DIRECT);
+		gpio_set(GPIO_USB3_DUT_HUB_SEL, USB3_DUT_HUB_SEL_DIRECT);
+
+		LOG_INF("Mux set to Direct Device Mode");
+	} else if (mode == BYPASS_MODE_H2H) {
+		gpio_set(GPIO_USB2_DUT_HUB_SEL, USB2_DUT_HUB_SEL_H2H);
+		gpio_set(GPIO_USB3_DUT_HUB_SEL, USB3_DUT_HUB_SEL_H2H);
+
+		LOG_INF("Mux set to Host-to-Host Bridge Mode");
+	} else {
+		LOG_INF("Mux disconnected");
+	}
+
+	gpio_set(GPIO_USB2_DUT_HUB_OE_L, output_enable);
+	gpio_set(GPIO_USB3_DUT_HUB_OE_L, output_enable);
+}
+#else
 #define USB2_MUX_DUT_SEL_DIRECT 1
 #define USB2_MUX_DUT_SEL_H2H 0
 
@@ -25,16 +61,8 @@ LOG_MODULE_REGISTER(bypass);
 #define USB3_MUX_HUB_SEL_DIRECT 1
 #define USB3_MUX_HUB_SEL_H2H 0
 
-void bypass_set_mode(enum bypass_mode_t mode)
+static void bypass_route_muxes(enum bypass_mode_t mode)
 {
-	if (hwrev_read() < BYPASS_HWREV_MIN_REQUIRED) {
-		if (mode != BYPASS_MODE_H2H) {
-			LOG_ERR("Bypass not supported on this maui revision");
-		}
-
-		return;
-	}
-
 	int output_enable = (mode != BYPASS_MODE_DISCONNECTED);
 
 	if (mode == BYPASS_MODE_DIRECT) {
@@ -61,4 +89,35 @@ void bypass_set_mode(enum bypass_mode_t mode)
 	gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, output_enable);
 	gpio_set(GPIO_USB2_MUX_HUB_OE_L, output_enable);
 	gpio_set(GPIO_USB3_MUX_HUB_OE_L, output_enable);
+}
+#endif
+
+void bypass_set_mode(enum bypass_mode_t mode)
+{
+	if (hwrev_read() < BYPASS_HWREV_MIN_REQUIRED) {
+		if (mode != BYPASS_MODE_H2H) {
+			LOG_ERR("Bypass not supported on this maui revision");
+		}
+
+		return;
+	}
+
+	if (mode != BYPASS_MODE_H2H) {
+		/*
+		 * Hold Prolific PL27A1 in reset BEFORE switching muxes away
+		 * from it so the bridge stays cleanly off USB while unused.
+		 */
+		(void)h2h_reset_hold(H2H_RESET_CLIENT_BYPASS);
+	}
+
+	bypass_route_muxes(mode);
+
+	if (mode == BYPASS_MODE_H2H) {
+		/*
+		 * Release our reset hold AFTER switching muxes back to H2H.
+		 * h2h_reset_release() keeps PL27A1 in reset if another client
+		 * still holds it, and is a no-op when already running.
+		 */
+		(void)h2h_reset_release(H2H_RESET_CLIENT_BYPASS);
+	}
 }

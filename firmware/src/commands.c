@@ -5,6 +5,7 @@
 
 #include "app_version.h"
 #include "gpio.h"
+#include "h2h.h"
 #include "led.h"
 #include "tps6699x.h"
 
@@ -98,11 +99,19 @@ static int cmd_data_dut_handler(const struct shell *sh, size_t argc,
 	}
 
 	if (strcmp(argv[1], "on") == 0) {
-		/* Bring H2H Bridge out of reset
-		 * and give it some time to settle up before DUT reconnection
-		 */
-		gpio_set(GPIO_H2H_RESET_L, 0);
-		k_sleep(K_MSEC(300));
+		/* Bring H2H Bridge out of reset */
+		(void)h2h_reset_release(H2H_RESET_CLIENT_DATA_DUT);
+		uint32_t holders = h2h_reset_holders();
+		if (holders != 0) {
+			shell_warn(
+				sh,
+				"H2H bridge still held in reset by another module (holders=0x%x)",
+				(unsigned int)holders);
+		} else {
+			/* Give H2H Bridge time to settle before DUT
+			 * reconnection */
+			k_sleep(K_MSEC(300));
+		}
 		/* Logic 1 = Active (Low physically for OE_L) */
 		gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 1);
 		gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 1);
@@ -111,23 +120,31 @@ static int cmd_data_dut_handler(const struct shell *sh, size_t argc,
 		/* Put H2H Bridge into reset.
 		 * For some reasons we see instabilities without this reset.
 		 */
-		gpio_set(GPIO_H2H_RESET_L, 1);
+		(void)h2h_reset_hold(H2H_RESET_CLIENT_DATA_DUT);
 		/* Logic 0 = Inactive (High physically for OE_L) */
 		gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 0);
 		gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 0);
 		shell_print(sh, "DUT Data: OFF (DISCONNECTED)");
 	} else if (strcmp(argv[1], "cycle") == 0) {
 		shell_print(sh, "DUT Data: Cycling started (1s delay)");
-		gpio_set(GPIO_H2H_RESET_L, 1);
+		(void)h2h_reset_hold(H2H_RESET_CLIENT_DATA_DUT);
 		gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 0);
 		gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 0);
 		k_sleep(K_MSEC(1000));
 
-		/* Bring H2H Bridge out of reset
-		 * and give it some time to settle up before DUT reconnection
-		 */
-		gpio_set(GPIO_H2H_RESET_L, 0);
-		k_sleep(K_MSEC(300));
+		/* Bring H2H Bridge out of reset */
+		(void)h2h_reset_release(H2H_RESET_CLIENT_DATA_DUT);
+		uint32_t holders = h2h_reset_holders();
+		if (holders != 0) {
+			shell_warn(
+				sh,
+				"H2H bridge still held in reset by another module (holders=0x%x)",
+				(unsigned int)holders);
+		} else {
+			/* Give H2H Bridge time to settle before DUT
+			 * reconnection */
+			k_sleep(K_MSEC(300));
+		}
 
 		gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 1);
 		gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 1);

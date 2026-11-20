@@ -3,17 +3,39 @@
  * found in the LICENSE file.
  */
 
+#include "gpio.h"
+#include "h2h.h"
+
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
-#include "bypass.h"
 
 LOG_MODULE_REGISTER(pendrive);
 
 #define DT_DRV_COMPAT google_maui_pendrive
+
+/*
+ * On Maui v2.0, Stage-2 DUT muxes (U9/U10, schematic nets
+ * usb2/3_mux_dut_sel_r) and Hub-side muxes (U1/U18, schematic nets
+ * usb2/3_mux_hub_sel) keep their v1.2 net names even though DUT-to-Hub
+ * bypass moved to Stage-1 U0811/U0812 (owned by bypass.c). On v2.0 these
+ * four muxes strictly select between the PL27A1 H2H bridge and the USB-C
+ * flash/pendrive muxes (U1202/U1203).
+ */
+#define USB2_MUX_DUT_SEL_FLASH 1
+#define USB2_MUX_DUT_SEL_H2H 0
+
+#define USB3_MUX_DUT_SEL_FLASH 0
+#define USB3_MUX_DUT_SEL_H2H 1
+
+#define USB2_MUX_HUB_SEL_FLASH 1
+#define USB2_MUX_HUB_SEL_H2H 0
+
+#define USB3_MUX_HUB_SEL_FLASH 1
+#define USB3_MUX_HUB_SEL_H2H 0
 
 struct pendrive_cfg_t {
 	struct gpio_dt_spec gpio_cc_pol;
@@ -31,6 +53,7 @@ struct pendrive_data_t {
 	struct pendrive_cfg_t *cfg;
 	struct gpio_callback cc_det_cb;
 	struct k_work gpio_wq;
+	struct k_mutex lock;
 };
 
 static void host_mux_wq_cb(struct k_work *wq)
@@ -38,22 +61,27 @@ static void host_mux_wq_cb(struct k_work *wq)
 	struct pendrive_data_t *data = CONTAINER_OF(wq, struct pendrive_data_t, gpio_wq);
 	struct pendrive_cfg_t *cfg = data->cfg;
 
+	k_mutex_lock(&data->lock, K_FOREVER);
+
 	int det = gpio_pin_get_dt(&cfg->gpio_cc_det);
 	int pol = gpio_pin_get_dt(&cfg->gpio_cc_pol);
 	LOG_INF("Detection: %d, Polarity: %d", det, pol);
 
 	if (det < 0 || pol < 0) {
 		LOG_ERR("Error getting detection or polarity pin");
-		return;
+		goto out;
 	}
 
 	int ret = gpio_pin_set_dt(&cfg->gpio_vbus_en, det);
 	if (ret < 0) {
 		LOG_ERR("Couldn't set VBus");
-		return;
+		goto out;
 	}
 
 	LOG_INF("VBus %s", (det) ? "enabled" : "disabled");
+
+out:
+	k_mutex_unlock(&data->lock);
 }
 
 static void pendrive_det_cb(const struct device *port,
@@ -87,6 +115,7 @@ static int pendrive_init(const struct device *dev)
 		return -EINVAL;
 	}
 
+	k_mutex_init(&data->lock);
 	k_work_init(&data->gpio_wq, host_mux_wq_cb);
 	gpio_init_callback(&data->cc_det_cb, pendrive_det_cb, BIT(cfg->gpio_cc_det.pin));
 	ret = gpio_add_callback(cfg->gpio_cc_det.port, &data->cc_det_cb);
@@ -128,19 +157,25 @@ DEVICE_DT_INST_DEFINE(0, pendrive_init, NULL, &pendrive_data_0, &pendrive_cfg_0,
 
 static int cmd_vbus(const struct shell *sh, size_t argc, char **argv)
 {
+	int val;
+
 	if (argc != 2) {
 		shell_error(sh, "Usage: pendrive vbus on|off");
 		return -EINVAL;
 	}
 
 	if (strcmp(argv[1], "on") == 0) {
-		gpio_pin_set_dt(&pendrive_cfg_0.gpio_vbus_en, 1);
+		val = 1;
 	} else if (strcmp(argv[1], "off") == 0) {
-		gpio_pin_set_dt(&pendrive_cfg_0.gpio_vbus_en, 0);
+		val = 0;
 	} else {
 		shell_error(sh, "Usage: pendrive vbus on|off");
 		return -EINVAL;
 	}
+
+	k_mutex_lock(&pendrive_data_0.lock, K_FOREVER);
+	gpio_pin_set_dt(&pendrive_cfg_0.gpio_vbus_en, val);
+	k_mutex_unlock(&pendrive_data_0.lock);
 
 	return 0;
 }
@@ -164,39 +199,122 @@ static int cmd_cc(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+static void pendrive_route_h2h_muxes_to_flash(void)
+{
+	/*
+	 * Hold Prolific PL27A1 in reset BEFORE switching U9/U10/U1/U18 away
+	 * from it onto the USB-C flash legs.
+	 */
+	(void)h2h_reset_hold(H2H_RESET_CLIENT_PENDRIVE);
+
+	gpio_set(GPIO_USB2_MUX_DUT_SEL_R, USB2_MUX_DUT_SEL_FLASH);
+	gpio_set(GPIO_USB3_MUX_DUT_SEL_R, USB3_MUX_DUT_SEL_FLASH);
+	gpio_set(GPIO_USB2_MUX_HUB_SEL, USB2_MUX_HUB_SEL_FLASH);
+	gpio_set(GPIO_USB3_MUX_HUB_SEL, USB3_MUX_HUB_SEL_FLASH);
+
+	gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 1);
+	gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 1);
+	gpio_set(GPIO_USB2_MUX_HUB_OE_L, 1);
+	gpio_set(GPIO_USB3_MUX_HUB_OE_L, 1);
+}
+
+static void pendrive_restore_h2h_muxes(void)
+{
+	gpio_set(GPIO_USB2_MUX_DUT_SEL_R, USB2_MUX_DUT_SEL_H2H);
+	gpio_set(GPIO_USB3_MUX_DUT_SEL_R, USB3_MUX_DUT_SEL_H2H);
+	gpio_set(GPIO_USB2_MUX_HUB_SEL, USB2_MUX_HUB_SEL_H2H);
+	gpio_set(GPIO_USB3_MUX_HUB_SEL, USB3_MUX_HUB_SEL_H2H);
+
+	gpio_set(GPIO_USB2_MUX_DUT_OE_R_L, 1);
+	gpio_set(GPIO_USB3_MUX_DUT_OE_R_L, 1);
+	gpio_set(GPIO_USB2_MUX_HUB_OE_L, 1);
+	gpio_set(GPIO_USB3_MUX_HUB_OE_L, 1);
+
+	/*
+	 * Release our reset hold AFTER restoring U9/U10/U1/U18 back to H2H.
+	 * h2h_reset_release() waits for mux settling before deasserting
+	 * RESETB if no other client still holds PL27A1 in reset.
+	 */
+	(void)h2h_reset_release(H2H_RESET_CLIENT_PENDRIVE);
+}
+
 static int cmd_mux(const struct shell *sh, size_t argc, char **argv)
 {
+	bool to_host = false;
+	bool to_dut = false;
+	bool to_off = false;
+
 	if (argc != 2) {
 		shell_error(sh, "Usage: pendrive mux host|dut|off");
 		return -EINVAL;
 	}
 
-	int oe = (strcmp(argv[1], "off") != 0);
-	if (oe) {
-		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_oe, 0);
-		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_oe, 0);
-		bypass_set_mode(BYPASS_MODE_H2H);
-
-		k_sleep(K_MSEC(100));
-	}
-
 	if (strcmp(argv[1], "host") == 0) {
-		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_sel, 0);
-		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_sel, 1);
-		shell_print(sh, "Pendrive connected to host");
+		to_host = true;
 	} else if (strcmp(argv[1], "dut") == 0) {
-		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_sel, 1);
-		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_sel, 0);
-		shell_print(sh, "Pendrive connected to DUT");
+		to_dut = true;
 	} else if (strcmp(argv[1], "off") == 0) {
-		shell_print(sh, "Pendrive disconnected");
+		to_off = true;
 	} else {
 		shell_error(sh, "Usage: pendrive mux host|dut|off");
 		return -EINVAL;
 	}
 
-	gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_oe, oe);
-	gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_oe, oe);
+	k_mutex_lock(&pendrive_data_0.lock, K_FOREVER);
+
+	/*
+	 * Disable VBUS power and isolate U1202/U1203 data muxes before
+	 * switching paths. USB 3.0 pendrives can otherwise latch at 480 Mbps
+	 * across hot-switched muxes until VBUS is power-cycled.
+	 */
+	gpio_pin_set_dt(&pendrive_cfg_0.gpio_vbus_en, 0);
+	gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_oe, 0);
+	gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_oe, 0);
+
+	if (!to_off) {
+		/*
+		 * Hold PL27A1 in reset and route U9/U10/U1/U18 onto their
+		 * USB-C flash legs (to U1202/U1203) with OEs enabled so
+		 * 'pendrive mux host|dut' works end-to-end without manual
+		 * GPIO overrides and independently of bypass.c.
+		 */
+		pendrive_route_h2h_muxes_to_flash();
+
+		/* Let VBUS discharge and data lines settle while isolated. */
+		k_sleep(K_MSEC(100));
+
+		if (to_host) {
+			gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_sel, 0);
+			gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_sel, 1);
+			shell_print(sh, "Pendrive connected to host");
+		} else if (to_dut) {
+			gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_sel, 1);
+			gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_sel, 0);
+			shell_print(sh, "Pendrive connected to DUT");
+		}
+
+		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_oe, 1);
+		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_oe, 1);
+
+		/* Wait for mux paths to settle before restoring VBUS power. */
+		k_sleep(K_MSEC(100));
+
+		/* Re-enable VBUS only if a pendrive is currently detected. */
+		if (gpio_pin_get_dt(&pendrive_cfg_0.gpio_cc_det) > 0) {
+			gpio_pin_set_dt(&pendrive_cfg_0.gpio_vbus_en, 1);
+		}
+	} else {
+		/*
+		 * Restore U1/U18 and U9/U10 from their flash legs back to the
+		 * PL27A1 H2H bridge so normal H2H / ADB connectivity
+		 * automatically reconnects when the pendrive is disconnected.
+		 * U1202/U1203 OEs and VBUS are already disabled above.
+		 */
+		pendrive_restore_h2h_muxes();
+		shell_print(sh, "Pendrive disconnected");
+	}
+
+	k_mutex_unlock(&pendrive_data_0.lock);
 
 	return 0;
 }
