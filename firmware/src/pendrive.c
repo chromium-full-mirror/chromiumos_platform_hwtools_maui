@@ -3,6 +3,7 @@
  * found in the LICENSE file.
  */
 
+#include "bypass.h"
 #include "gpio.h"
 #include "h2h.h"
 
@@ -12,6 +13,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+
+#if DT_HAS_COMPAT_STATUS_OKAY(ti_tps6699x)
+#include "tps6699x.h"
+#endif
 
 LOG_MODULE_REGISTER(pendrive);
 
@@ -238,6 +243,32 @@ static void pendrive_restore_h2h_muxes(void)
 	(void)h2h_reset_release(H2H_RESET_CLIENT_PENDRIVE);
 }
 
+static void pendrive_set_dut_pd_mode(const struct shell *sh, bool active)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(ti_tps6699x)
+	const struct device *pdc_dev = DEVICE_DT_GET_ONE(ti_tps6699x);
+	int rv;
+
+	if (!device_is_ready(pdc_dev)) {
+		if (active) {
+			shell_warn(
+				sh,
+				"PDC device not ready; DUT PD role not changed");
+		}
+		return;
+	}
+
+	rv = tps_dut_set_pendrive_mode(pdc_dev, active);
+	if (rv < 0) {
+		shell_warn(sh, "Failed to %s DUT PD data role (%d)",
+			   active ? "swap" : "restore", rv);
+	}
+#else
+	ARG_UNUSED(sh);
+	ARG_UNUSED(active);
+#endif
+}
+
 static int cmd_mux(const struct shell *sh, size_t argc, char **argv)
 {
 	bool to_host = false;
@@ -280,17 +311,24 @@ static int cmd_mux(const struct shell *sh, size_t argc, char **argv)
 		 */
 		pendrive_route_h2h_muxes_to_flash();
 
+		/*
+		 * On Maui v2.0, Stage-1 U0811/U0812 must route DUT to Stage-2
+		 * (U9/U10) and Maui must act as PD UFP (DUT as USB Host) for
+		 * 'pendrive mux dut'. Switching to 'host' clears any previous
+		 * DUT override and restores normal Phone Direct / DFP state.
+		 */
+		bypass_set_dut_flash_override(to_dut);
+		pendrive_set_dut_pd_mode(sh, to_dut);
+
 		/* Let VBUS discharge and data lines settle while isolated. */
 		k_sleep(K_MSEC(100));
 
 		if (to_host) {
 			gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_sel, 0);
 			gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_sel, 1);
-			shell_print(sh, "Pendrive connected to host");
 		} else if (to_dut) {
 			gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_sel, 1);
 			gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb3_sel, 0);
-			shell_print(sh, "Pendrive connected to DUT");
 		}
 
 		gpio_pin_set_dt(&pendrive_cfg_0.gpio_usb2_oe, 1);
@@ -303,14 +341,20 @@ static int cmd_mux(const struct shell *sh, size_t argc, char **argv)
 		if (gpio_pin_get_dt(&pendrive_cfg_0.gpio_cc_det) > 0) {
 			gpio_pin_set_dt(&pendrive_cfg_0.gpio_vbus_en, 1);
 		}
+
+		shell_print(sh, "Pendrive connected to %s",
+			    to_dut ? "DUT" : "host");
 	} else {
 		/*
 		 * Restore U1/U18 and U9/U10 from their flash legs back to the
-		 * PL27A1 H2H bridge so normal H2H / ADB connectivity
-		 * automatically reconnects when the pendrive is disconnected.
+		 * PL27A1 H2H bridge, release any Stage-1 U0811/U0812 bypass
+		 * override, and restore the DUT PD data role so normal H2H or
+		 * Phone Direct ADB connectivity automatically reconnects.
 		 * U1202/U1203 OEs and VBUS are already disabled above.
 		 */
 		pendrive_restore_h2h_muxes();
+		bypass_set_dut_flash_override(false);
+		pendrive_set_dut_pd_mode(sh, false);
 		shell_print(sh, "Pendrive disconnected");
 	}
 

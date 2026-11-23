@@ -8,11 +8,18 @@
 #include "h2h.h"
 #include "hwrev.h"
 
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(bypass);
 
 #define BYPASS_HWREV_MIN_REQUIRED 1
+
+static K_MUTEX_DEFINE(bypass_lock);
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+static enum bypass_mode_t bypass_requested_mode = BYPASS_MODE_H2H;
+static bool bypass_dut_flash_override;
+#endif
 
 #ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
 /*
@@ -102,6 +109,12 @@ void bypass_set_mode(enum bypass_mode_t mode)
 		return;
 	}
 
+	k_mutex_lock(&bypass_lock, K_FOREVER);
+
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+	bypass_requested_mode = mode;
+#endif
+
 	if (mode != BYPASS_MODE_H2H) {
 		/*
 		 * Hold Prolific PL27A1 in reset BEFORE switching muxes away
@@ -110,7 +123,26 @@ void bypass_set_mode(enum bypass_mode_t mode)
 		(void)h2h_reset_hold(H2H_RESET_CLIENT_BYPASS);
 	}
 
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+	if (bypass_dut_flash_override) {
+		/*
+		 * Keep Stage-1 U0811/U0812 routed onward to Stage-2 U9/U10
+		 * while the pendrive-to-DUT path is active.
+		 */
+		gpio_set(GPIO_USB2_DUT_HUB_SEL, USB2_DUT_HUB_SEL_H2H);
+		gpio_set(GPIO_USB3_DUT_HUB_SEL, USB3_DUT_HUB_SEL_H2H);
+		gpio_set(GPIO_USB2_DUT_HUB_OE_L, 1);
+		gpio_set(GPIO_USB3_DUT_HUB_OE_L, 1);
+		if (mode != BYPASS_MODE_H2H) {
+			LOG_INF("Bypass mode %d deferred while pendrive DUT override is active",
+				mode);
+		}
+	} else {
+		bypass_route_muxes(mode);
+	}
+#else
 	bypass_route_muxes(mode);
+#endif
 
 	if (mode == BYPASS_MODE_H2H) {
 		/*
@@ -120,4 +152,38 @@ void bypass_set_mode(enum bypass_mode_t mode)
 		 */
 		(void)h2h_reset_release(H2H_RESET_CLIENT_BYPASS);
 	}
+
+	k_mutex_unlock(&bypass_lock);
+}
+
+void bypass_set_dut_flash_override(bool active)
+{
+#ifdef CONFIG_BOARD_MAUI_V2P0_IT82002
+	k_mutex_lock(&bypass_lock, K_FOREVER);
+
+	if (bypass_dut_flash_override == active) {
+		k_mutex_unlock(&bypass_lock);
+		return;
+	}
+
+	bypass_dut_flash_override = active;
+
+	if (active) {
+		if (bypass_requested_mode != BYPASS_MODE_H2H) {
+			gpio_set(GPIO_USB2_DUT_HUB_SEL, USB2_DUT_HUB_SEL_H2H);
+			gpio_set(GPIO_USB3_DUT_HUB_SEL, USB3_DUT_HUB_SEL_H2H);
+			gpio_set(GPIO_USB2_DUT_HUB_OE_L, 1);
+			gpio_set(GPIO_USB3_DUT_HUB_OE_L, 1);
+			LOG_INF("Stage-1 DUT muxes overridden to U9/U10 for pendrive");
+		}
+	} else {
+		if (bypass_requested_mode != BYPASS_MODE_H2H) {
+			bypass_route_muxes(bypass_requested_mode);
+		}
+	}
+
+	k_mutex_unlock(&bypass_lock);
+#else
+	ARG_UNUSED(active);
+#endif
 }

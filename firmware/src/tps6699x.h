@@ -8,6 +8,8 @@
 
 #include "tps6699x_reg.h"
 
+#include <stdbool.h>
+
 #include <zephyr/device.h>
 
 /**
@@ -259,5 +261,24 @@ int tps_wr_port_config(const struct device *dev, union reg_port_config *buf);
  */
 void tps_decode_identity(const union reg_rx_identity_sop *rx_id,
 			 struct tps_pd_identity *id);
+
+/**
+ * @brief Configure DUT PD data role override for USB-C pendrive-to-DUT mode.
+ *
+ * When @p active is true, checks the live DUT port status and swaps Maui
+ * to UFP (making the DUT USB Host) if a DUT is connected as UFP, and keeps
+ * Maui in UFP across subsequent PD re-contracts until cleared.
+ *
+ * When @p active is false, clears the override and restores the DUT's
+ * normal desired data role (e.g. swaps Maui back to DFP for an Android
+ * Phone so Direct Device Mode / ADB reconnects automatically).
+ *
+ * @param dev Pointer to the TPS6699x device instance
+ * @param active True when routing pendrive to DUT, false otherwise
+ *
+ * @return 0 on success (or no DUT connected), -ETIMEDOUT if a connected
+ *         DUT did not complete the role swap in time, or negative errno.
+ */
+int tps_dut_set_pendrive_mode(const struct device *dev, bool active);
 
 #endif /* ZEPHYR_DRIVERS_USBC_TPS6699X_H_ */

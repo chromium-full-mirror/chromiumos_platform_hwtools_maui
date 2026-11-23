@@ -30,6 +30,8 @@
 
 #define TPS_4CC_POLL_DELAY K_USEC(200)
 #define TPS_RESET_DELAY K_MSEC(2000)
+#define TPS_DR_SWAP_POLL_ATTEMPTS 10
+#define TPS_DR_SWAP_POLL_DELAY_MS 50
 
 /** Split streaming transfers down into chunks of this size for more manageable
  *  I2C write lengths.
@@ -73,6 +75,8 @@ struct tps6699x_data {
 	int forced_debug_accessory_mode;
 	bool dut_connected;
 	bool charger_connected;
+	enum tps_pd_data_role dut_desired_role;
+	bool pendrive_dut_active;
 };
 
 static const struct tps6699x_config tps6699x_config = {
@@ -741,6 +745,85 @@ void tps_decode_identity(const union reg_rx_identity_sop *rx_id,
 	}
 }
 
+static int tps_ensure_dut_data_role(const struct device *dev,
+				    enum tps_pd_data_role target_role)
+{
+	union reg_status status;
+	int rv;
+
+	rv = tps_rd_status_port(dev, TPS_PORT_DUT, &status);
+	if (rv != 0) {
+		LOG_ERR("DUT Port: Failed to read status (%d)", rv);
+		return rv;
+	}
+
+	if (!status.plug_present) {
+		LOG_INF("DUT Port: No DUT connected; skipping data role swap");
+		return 0;
+	}
+
+	if (status.data_role == target_role) {
+		return 0;
+	}
+
+	LOG_INF("DUT Port: Swapping Maui data role to %s",
+		target_role == TPS_PD_DATA_ROLE_UFP ? "UFP (DUT Host)" :
+						      "DFP (DUT Device)");
+
+	rv = tps_cmd_data_role_swap(dev, target_role);
+	if (rv != 0) {
+		LOG_ERR("DUT Port: Data role swap command failed (%d)", rv);
+		return rv;
+	}
+
+	for (int i = 0; i < TPS_DR_SWAP_POLL_ATTEMPTS; i++) {
+		k_msleep(TPS_DR_SWAP_POLL_DELAY_MS);
+		rv = tps_rd_status_port(dev, TPS_PORT_DUT, &status);
+		if (rv != 0) {
+			LOG_ERR("DUT Port: Failed to poll status after DR_Swap (%d)",
+				rv);
+			return rv;
+		}
+		if (!status.plug_present || status.data_role == target_role) {
+			return 0;
+		}
+	}
+
+	LOG_WRN("DUT Port: Data role swap to %s timed out/rejected (still %s)",
+		target_role == TPS_PD_DATA_ROLE_UFP ? "UFP" : "DFP",
+		status.data_role ? "DFP" : "UFP");
+	return -ETIMEDOUT;
+}
+
+int tps_dut_set_pendrive_mode(const struct device *dev, bool active)
+{
+	struct tps6699x_data *data;
+	enum tps_pd_data_role desired;
+	bool was_active;
+
+	if (!device_is_ready(dev)) {
+		return -ENODEV;
+	}
+
+	data = dev->data;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	was_active = data->pendrive_dut_active;
+	data->pendrive_dut_active = active;
+	desired = data->dut_desired_role;
+	k_mutex_unlock(&data->lock);
+
+	if (active) {
+		return tps_ensure_dut_data_role(dev, TPS_PD_DATA_ROLE_UFP);
+	}
+
+	if (!was_active) {
+		return 0;
+	}
+
+	return tps_ensure_dut_data_role(dev, desired);
+}
+
 #ifdef CONFIG_TPS6699X_INTERRUPTS
 static void tps_update_leds(struct tps6699x_data *data)
 {
@@ -760,6 +843,10 @@ static void tps_handle_new_contract_dut(struct tps6699x_data *data)
 	union reg_rx_identity_sop rx_id;
 	struct tps_pd_identity id;
 	union reg_status status;
+	enum tps_pd_data_role desired_role;
+	enum bypass_mode_t target_bypass;
+	bool force_swap = false;
+	bool pendrive_active;
 
 	LOG_INF("DUT Port: Handling New Contract");
 
@@ -785,32 +872,45 @@ static void tps_handle_new_contract_dut(struct tps6699x_data *data)
 	/*
 	 * For Pixel Phone, Maui should stay as DFP.
 	 * For Chromebook, Maui should swap to UFP if possible.
-	 * DFP/UFP roles need to be aligned with Mux direction.
+	 * DFP/UFP roles need to be aligned with Mux direction, except while
+	 * USB-C pendrive-to-DUT mode overrides Maui to UFP (DUT as USB Host).
 	 */
 	if (id.usb_host == 1 && id.usb_device == 1) {
 		LOG_INF("Detected Android Phone");
-
-		if (status.data_role == TPS_PD_DATA_ROLE_UFP) {
-			LOG_INF("Swapping to DFP for Phone");
-			tps_cmd_data_role_swap(dev, TPS_PD_DATA_ROLE_DFP);
-		}
-
-		bypass_set_mode(BYPASS_MODE_DIRECT);
+		desired_role = TPS_PD_DATA_ROLE_DFP;
+		target_bypass = BYPASS_MODE_DIRECT;
+		force_swap = true;
 	} else if (id.usb_host == 1 && id.usb_device == 0) {
 		LOG_INF("Detected Chromebook");
-
-		if (status.data_role == TPS_PD_DATA_ROLE_DFP) {
-			LOG_INF("Swapping to UFP for Chromebook");
-			tps_cmd_data_role_swap(dev, TPS_PD_DATA_ROLE_UFP);
-		}
-
-		bypass_set_mode(BYPASS_MODE_H2H);
+		desired_role = TPS_PD_DATA_ROLE_UFP;
+		target_bypass = BYPASS_MODE_H2H;
+		force_swap = true;
 	} else {
 		LOG_INF("Detected Unknown Device (Host=%d, Dev=%d)",
 			id.usb_host, id.usb_device);
-
-		bypass_set_mode(BYPASS_MODE_H2H);
+		desired_role = TPS_PD_DATA_ROLE_UFP;
+		target_bypass = BYPASS_MODE_H2H;
 	}
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	data->dut_desired_role = desired_role;
+	pendrive_active = data->pendrive_dut_active;
+	k_mutex_unlock(&data->lock);
+
+	if (pendrive_active) {
+		if (status.data_role != TPS_PD_DATA_ROLE_UFP) {
+			LOG_INF("Pendrive DUT active: swapping to UFP (DUT Host)");
+			tps_cmd_data_role_swap(dev, TPS_PD_DATA_ROLE_UFP);
+		}
+	} else if (force_swap && status.data_role != desired_role) {
+		LOG_INF("Swapping to %s for %s",
+			desired_role == TPS_PD_DATA_ROLE_DFP ? "DFP" : "UFP",
+			desired_role == TPS_PD_DATA_ROLE_DFP ? "Phone" :
+							       "Chromebook");
+		tps_cmd_data_role_swap(dev, desired_role);
+	}
+
+	bypass_set_mode(target_bypass);
 }
 
 static void tps_handle_new_contract_charger(struct tps6699x_data *data)
@@ -898,6 +998,9 @@ static void tps_re_enable_work_handler(struct k_work *work)
 	}
 
 	data->dut_connected = false;
+	k_mutex_lock(&data->lock, K_FOREVER);
+	data->dut_desired_role = TPS_PD_DATA_ROLE_UFP;
+	k_mutex_unlock(&data->lock);
 	tps_update_leds(data);
 
 	/* Reset Mux to default Bridge Mode */
@@ -1676,6 +1779,8 @@ static int tps6699x_init(const struct device *dev)
 	data->forced_debug_accessory_mode = DEBUG_ACCESSORY_AUTO;
 	data->dut_connected = false;
 	data->charger_connected = false;
+	data->dut_desired_role = TPS_PD_DATA_ROLE_UFP;
+	data->pendrive_dut_active = false;
 
 	if (!i2c_is_ready_dt(&cfg->i2c)) {
 		LOG_ERR("I2C bus not ready");
@@ -1705,6 +1810,9 @@ static int tps6699x_init(const struct device *dev)
 	if (status_dut.plug_present) {
 		LOG_INF("Detected previous DUT contract / plug");
 		data->dut_connected = true;
+		data->dut_desired_role = status_dut.data_role ?
+						 TPS_PD_DATA_ROLE_DFP :
+						 TPS_PD_DATA_ROLE_UFP;
 	}
 
 	/* Check for pre-existing contract / plug on Charger port */
