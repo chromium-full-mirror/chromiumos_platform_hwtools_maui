@@ -169,6 +169,9 @@ static int cmd_jump_to_bsl_handler(const struct shell *sh, size_t argc,
 #if defined(CONFIG_SOC_FAMILY_TI_MSPM0) || defined(CONFIG_SOC_MSPM0G3507) || \
 	defined(CONFIG_SOC_MSPM0G5117)
 	shell_print(sh, "Going into BSL mode");
+	/* Let UART TX drain before masking IRQs and wiping SRAM. */
+	k_msleep(10);
+	(void)irq_lock();
 
 	/* Erase SRAM completely before jumping to BSL */
 	__asm__ volatile(
